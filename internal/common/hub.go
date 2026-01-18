@@ -4,7 +4,8 @@ import "sync"
 
 type Hub struct {
 	Clients    map[*Client]bool
-	Broadcast  chan []byte
+	Rooms      map[string]*Room
+	Broadcast  chan BroadcastMessage
 	Register   chan *Client
 	Unregister chan *Client
 	Mu         sync.RWMutex
