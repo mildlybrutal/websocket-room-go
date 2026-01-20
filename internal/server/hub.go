@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"log"
 	"time"
 
@@ -9,6 +10,10 @@ import (
 
 type MyServerHub struct {
 	*common.Hub
+}
+
+type MyServerRoom struct {
+	*common.Room
 }
 
 func NewHub() *common.Hub {
@@ -62,20 +67,117 @@ func (h *MyServerHub) Run() {
 	}
 }
 
-func (h *MyServerHub) broadcastMessage(message []byte, exclude *common.Client) {
+func (r *MyServerRoom) Broadcast(message []byte, exclude *common.Client) {
 	//broadcasting logic
-	h.Mu.RLock() // RLock because shared access (for reading only)
-	defer h.Mu.RLock()
+	r.Mu.RLock() // RLock because shared access (for reading only)
+	defer r.Mu.RLock()
 
-	for client := range h.Clients {
+	for client := range r.Clients {
 		//exclude -> send a message to "everyone but me."
 		if client != exclude {
 			select {
 			case client.Send <- message:
 			default:
-				close(client.Send)
-				delete(h.Clients, client)
+				//Buffer full,skip
 			}
 		}
 	}
+}
+
+func (h *MyServerHub) JoinRoom(RoomID string, client *common.Client) error {
+	h.Mu.Lock()
+	room, exists := h.Rooms[RoomID]
+	if !exists {
+		room = &common.Room{
+			ID:      RoomID,
+			Clients: make(map[*common.Client]bool),
+		}
+
+		h.Rooms[RoomID] = room
+	}
+
+	h.Mu.Unlock()
+
+	room.AddClient(client)
+	client.Broadcast[room]
+
+	notification, _ := json.Marshal(map[string]interface{}{
+		"type":   "user_joined_room",
+		"room":   RoomID,
+		"userId": client.ID,
+	})
+
+	room.Broadcast(notification, client)
+	roomInfo, _ := json.Marshal(map[string]interface{}{
+		"type":    "room_joined",
+		"room":    RoomID,
+		"members": room.GetMemberIDs(),
+	})
+
+	client.Send <- roomInfo
+
+	return nil
+}
+
+func (h *MyServerHub) LeaveRoom(client *common.Client, RoomID string) {
+	h.Mu.RLock()
+
+	room, exists := h.Rooms[RoomID]
+	h.Mu.RUnlock()
+
+	if !exists {
+		return
+	}
+
+	room.RemoveClient(client)
+
+	delete(client.Rooms, RoomID)
+
+	notification, _ := json.Marshal(map[string]interface{}{
+		"type":   "user_left_room",
+		"room":   RoomID,
+		"userID": client.ID,
+	})
+
+	room.Broadcast(notification, nil)
+
+	if room.IsEmpty() {
+		h.Mu.Lock()
+		delete(h.Rooms, RoomID)
+		h.Mu.Unlock()
+	}
+}
+
+func (r *MyServerRoom) AddClient(client *common.Client) {
+	r.Mu.Lock()
+	defer r.Mu.Unlock()
+
+	r.Clients[client] = true
+}
+
+func (r *MyServerRoom) RemoveClient(client *common.Client) {
+	r.Mu.Lock()
+	defer r.Mu.Unlock()
+
+	delete(r.Clients, client)
+}
+
+func (r *MyServerRoom) GetMemberIDs() []string {
+	r.Mu.RLock()
+	defer r.Mu.RUnlock()
+
+	members := make([]string, 0, len(r.Clients))
+
+	for client := range r.Clients {
+		members = append(members, client.ID)
+	}
+
+	return members
+}
+
+func (r *MyServerRoom) IsEmpty() {
+	r.Mu.RLock()
+	defer r.Mu.Unlock()
+
+	return len(r.Clients) == 0
 }
