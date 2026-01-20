@@ -35,7 +35,7 @@ func (c *MyServerClient) ReadPump() {
 
 		switch msg["type"] {
 		case "broadcast":
-			c.Hub.Broadcast <- message
+			c.Hub.Broadcast <- common.BroadcastMessage{}
 		case "ping":
 			pong, _ := json.Marshal(map[string]string{"type": "pong"})
 			c.Send <- pong
@@ -77,7 +77,7 @@ func (c *MyServerClient) HandleMessage(message []byte) {
 		if roomID, ok := msg["room"].(string); ok {
 			c.Hub.LeaveRoom(c.Client, roomID)
 		}
-	case "room_mesage":
+	case "room_message":
 		if roomID, ok := msg["room"].(string); ok {
 			if _, inRoom := c.Rooms[roomID]; inRoom {
 				c.Hub.Broadcast <- common.BroadcastMessage{
@@ -95,7 +95,7 @@ func (c *MyServerClient) HandleMessage(message []byte) {
 		}
 	default:
 		// Global broadcast
-		c.Hub.Broadcast <- common.BroadcastMessage{Message: message, Sender: c}
+		c.Hub.Broadcast <- common.BroadcastMessage{Message: message, Sender: c.Client}
 
 	}
 }

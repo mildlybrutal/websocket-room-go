@@ -5,8 +5,6 @@ import (
 	"log"
 	"sync"
 	"time"
-
-	"github.com/mildlybrutal/websocketGo/internal/common"
 )
 
 type Hub struct {
@@ -18,13 +16,13 @@ type Hub struct {
 	Mu         sync.RWMutex
 }
 
-func NewHub() *common.Hub {
-	return &common.Hub{
-		Clients:    make(map[*common.Client]bool),
-		Rooms:      make(map[string]*common.Room),
-		Broadcast:  make(chan common.BroadcastMessage),
-		Register:   make(chan *common.Client),
-		Unregister: make(chan *common.Client),
+func NewHub() *Hub {
+	return &Hub{
+		Clients:    make(map[string]*Client),
+		Rooms:      make(map[string]*Room),
+		Broadcast:  make(chan BroadcastMessage),
+		Register:   make(chan *Client),
+		Unregister: make(chan *Client),
 	}
 }
 
@@ -69,13 +67,44 @@ func (h *Hub) Run() {
 	}
 }
 
-func (h *Hub) JoinRoom(RoomID string, client *common.Client) error {
+func (h *Hub) broadcastMessage(message BroadcastMessage) {
+	h.Mu.RLock()
+	defer h.Mu.RUnlock()
+
+	if message.Room != "" {
+		if room, exists := h.Rooms[message.Room]; exists {
+			room.Broadcast(message.Message, message.Sender)
+		} else {
+			for _, client := range h.Clients {
+				if client != message.Sender {
+					select {
+					case client.Send <- message.Message:
+					default:
+						//handle full buffer
+					}
+				}
+			}
+		}
+	}
+}
+
+func (h *Hub) cleanup() {
+	h.Mu.Lock()
+	defer h.Mu.Unlock()
+	for id, room := range h.Rooms {
+		if room.IsEmpty() {
+			delete(h.Rooms, id)
+		}
+	}
+}
+
+func (h *Hub) JoinRoom(RoomID string, client *Client) error {
 	h.Mu.Lock()
 	room, exists := h.Rooms[RoomID]
 	if !exists {
-		room = &common.Room{
+		room = &Room{
 			ID:      RoomID,
-			Clients: make(map[*common.Client]bool),
+			Clients: make(map[*Client]bool),
 		}
 
 		h.Rooms[RoomID] = room
@@ -84,7 +113,6 @@ func (h *Hub) JoinRoom(RoomID string, client *common.Client) error {
 	h.Mu.Unlock()
 
 	room.AddClient(client)
-	client.Broadcast[room]
 
 	client.Mu.Lock()
 	client.Rooms[RoomID] = true
@@ -109,7 +137,7 @@ func (h *Hub) JoinRoom(RoomID string, client *common.Client) error {
 	return nil
 }
 
-func (h *Hub) LeaveRoom(client *common.Client, RoomID string) {
+func (h *Hub) LeaveRoom(client *Client, RoomID string) {
 	h.Mu.RLock()
 
 	room, exists := h.Rooms[RoomID]
@@ -121,7 +149,12 @@ func (h *Hub) LeaveRoom(client *common.Client, RoomID string) {
 
 	room.RemoveClient(client)
 
+	if room.IsEmpty() {
+		delete(h.Rooms, RoomID)
+	}
+	client.Mu.Lock()
 	delete(client.Rooms, RoomID)
+	client.Mu.Unlock()
 
 	notification, _ := json.Marshal(map[string]interface{}{
 		"type":   "user_left_room",
@@ -130,10 +163,4 @@ func (h *Hub) LeaveRoom(client *common.Client, RoomID string) {
 	})
 
 	room.Broadcast(notification, nil)
-
-	if room.IsEmpty() {
-		h.Mu.Lock()
-		delete(h.Rooms, RoomID)
-		h.Mu.Unlock()
-	}
 }

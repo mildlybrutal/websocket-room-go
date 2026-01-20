@@ -2,8 +2,6 @@ package common
 
 import (
 	"sync"
-
-	"github.com/mildlybrutal/websocketGo/internal/common"
 )
 
 type Room struct {
@@ -13,7 +11,7 @@ type Room struct {
 	Mu      sync.RWMutex
 }
 
-func (r *Room) Broadcast(message []byte, exclude *common.Client) {
+func (r *Room) Broadcast(message []byte, exclude *Client) {
 	//broadcasting logic
 	r.Mu.RLock() // RLock because shared access (for reading only)
 	defer r.Mu.RUnlock()
@@ -30,14 +28,14 @@ func (r *Room) Broadcast(message []byte, exclude *common.Client) {
 	}
 }
 
-func (r *Room) AddClient(client *common.Client) {
+func (r *Room) AddClient(client *Client) {
 	r.Mu.Lock()
 	defer r.Mu.Unlock()
 
 	r.Clients[client] = true
 }
 
-func (r *Room) RemoveClient(client *common.Client) {
+func (r *Room) RemoveClient(client *Client) {
 	r.Mu.Lock()
 	defer r.Mu.Unlock()
 
@@ -59,7 +57,7 @@ func (r *Room) GetMemberIDs() []string {
 
 func (r *Room) IsEmpty() bool {
 	r.Mu.RLock()
-	defer r.Mu.Unlock()
+	defer r.Mu.RUnlock()
 
 	return len(r.Clients) == 0
 }
