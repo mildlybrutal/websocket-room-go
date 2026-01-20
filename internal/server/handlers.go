@@ -66,7 +66,7 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-var MainHub = NewHub()
+var MainHub = common.NewHub()
 
 func HandleConnections(w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
@@ -82,10 +82,11 @@ func HandleConnections(w http.ResponseWriter, r *http.Request) {
 	}
 
 	baseClient := &common.Client{
-		ID:   clientID,
-		Conn: conn,
-		Send: make(chan []byte, 256),
-		Hub:  MainHub,
+		ID:    clientID,
+		Conn:  conn,
+		Send:  make(chan []byte, 256),
+		Hub:   MainHub,
+		Rooms: make(map[string]bool),
 	}
 
 	serverClient := &MyServerClient{

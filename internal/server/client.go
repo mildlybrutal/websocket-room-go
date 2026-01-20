@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"log"
 
 	"github.com/gorilla/websocket"
 	"github.com/mildlybrutal/websocketGo/internal/common"
@@ -70,11 +71,11 @@ func (c *MyServerClient) HandleMessage(message []byte) {
 	switch msg["type"] {
 	case "join_room":
 		if roomID, ok := msg["room"].(string); ok {
-			c.Hub.JoinRoom(c, roomID)
+			c.Hub.JoinRoom(roomID, c.Client)
 		}
-	case "room_message":
+	case "leave_room":
 		if roomID, ok := msg["room"].(string); ok {
-			c.Hub.LeaveRoo(c, roomID)
+			c.Hub.LeaveRoom(c.Client, roomID)
 		}
 	case "room_mesage":
 		if roomID, ok := msg["room"].(string); ok {
@@ -82,10 +83,10 @@ func (c *MyServerClient) HandleMessage(message []byte) {
 				c.Hub.Broadcast <- common.BroadcastMessage{
 					Room:    roomID,
 					Message: message,
-					Sender:  c,
+					Sender:  c.Client,
 				}
 			} else {
-				c.SendError("Not in room")
+				c.sendError("Not in room")
 			}
 		}
 	case "private_message":
@@ -99,14 +100,22 @@ func (c *MyServerClient) HandleMessage(message []byte) {
 	}
 }
 
-func (c *MyServerClient) sendError(err string) {
-	errMsg := json.Marshal(map[string]string{
+func (c *MyServerClient) sendError(errStr string) {
+	// json.Marshal returns ([]byte, error)
+	errMsg, err := json.Marshal(map[string]string{
 		"type":  "error",
-		"error": err,
+		"error": errStr,
 	})
+
+	// Check if marshaling itself failed
+	if err != nil {
+		log.Printf("Error marshaling error message: %v", err)
+		return
+	}
+
+	// Now errMsg is of type []byte and can be sent to the channel
 	c.Send <- errMsg
 }
-
 func (c *MyServerClient) sendPrivateMessage(targetID string, message []byte) {
 	c.Hub.Mu.RLock()
 	target, exists := c.Hub.Clients[targetID]
@@ -114,7 +123,7 @@ func (c *MyServerClient) sendPrivateMessage(targetID string, message []byte) {
 	c.Hub.Mu.RUnlock()
 
 	if exists {
-		target.send <- message
+		target.Send <- message
 	} else {
 		c.sendError("user not found")
 	}
