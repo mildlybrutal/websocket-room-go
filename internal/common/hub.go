@@ -48,16 +48,16 @@ func (h *Hub) Run() {
 				for roomID := range h.Rooms {
 					if room, exists := h.Rooms[roomID]; exists {
 						room.RemoveClient(client)
+						if room.IsEmpty() {
+							delete(h.Rooms, roomID)
+						}
 					}
 				}
 				delete(h.Clients, client.ID) //remove from list
 				close(client.Send)           //shuts down client's individual channel
 				log.Printf("Client %s unregistered", client.ID)
-
-				h.Mu.Unlock() // Unlock before broadcasting
-			} else {
-				h.Mu.Unlock()
 			}
+			h.Mu.Unlock() // Unlock before broadcasting
 		case message := <-h.Broadcast:
 			// A message was received from one client that needs to go to everyone.
 			h.broadcastMessage(message)
@@ -115,18 +115,24 @@ func (h *Hub) JoinRoom(RoomID string, client *Client) error {
 	room.AddClient(client)
 
 	client.Mu.Lock()
+
+	if client.Rooms == nil {
+		client.Rooms = make(map[string]bool)
+	}
+
 	client.Rooms[RoomID] = true
 
 	client.Mu.Unlock()
 
-	notification, _ := json.Marshal(map[string]interface{}{
+	notification, _ := json.Marshal(map[string]any{
 		"type":   "user_joined_room",
 		"room":   RoomID,
 		"userId": client.ID,
 	})
 
 	room.Broadcast(notification, client)
-	roomInfo, _ := json.Marshal(map[string]interface{}{
+
+	roomInfo, _ := json.Marshal(map[string]any{
 		"type":    "room_joined",
 		"room":    RoomID,
 		"members": room.GetMemberIDs(),
@@ -138,10 +144,10 @@ func (h *Hub) JoinRoom(RoomID string, client *Client) error {
 }
 
 func (h *Hub) LeaveRoom(client *Client, RoomID string) {
-	h.Mu.RLock()
+	h.Mu.Lock()
+	defer h.Mu.Unlock()
 
 	room, exists := h.Rooms[RoomID]
-	h.Mu.RUnlock()
 
 	if !exists {
 		return
@@ -156,7 +162,7 @@ func (h *Hub) LeaveRoom(client *Client, RoomID string) {
 	delete(client.Rooms, RoomID)
 	client.Mu.Unlock()
 
-	notification, _ := json.Marshal(map[string]interface{}{
+	notification, _ := json.Marshal(map[string]any{
 		"type":   "user_left_room",
 		"room":   RoomID,
 		"userID": client.ID,

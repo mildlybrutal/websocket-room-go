@@ -24,51 +24,39 @@ func (c *MyServerClient) ReadPump() {
 		_, message, err := c.Conn.ReadMessage()
 
 		if err != nil {
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+				log.Printf("error: %v", err)
+			}
 			break
 		}
 
-		var msg map[string]interface{}
-
-		if err := json.Unmarshal(message, &msg); err != nil {
-			continue
-		}
-
-		switch msg["type"] {
-		case "broadcast":
-			c.Hub.Broadcast <- common.BroadcastMessage{}
-		case "ping":
-			pong, _ := json.Marshal(map[string]string{"type": "pong"})
-			c.Send <- pong
-		default:
-			c.Send <- message
-		}
+		c.HandleMessage(message)
 	}
 }
 
 func (c *MyServerClient) WritePump() {
 	defer c.Conn.Close()
 
-	for {
-		select {
-		case message, ok := <-c.Send:
-			if !ok {
-				c.Conn.WriteMessage(websocket.CloseMessage, []byte{})
-				return
-			}
-			c.Conn.WriteMessage(websocket.TextMessage, message)
+	for message := range c.Send {
+		if err := c.Conn.WriteMessage(websocket.TextMessage, message); err != nil {
+			return
 		}
 	}
+
+	c.Conn.WriteMessage(websocket.CloseMessage, []byte{})
 }
 
 func (c *MyServerClient) HandleMessage(message []byte) {
-	var msg map[string]interface{}
+	var msg map[string]any
 
 	if err := json.Unmarshal(message, &msg); err != nil {
 		c.sendError("Invalid message format")
 		return
 	}
 
-	switch msg["type"] {
+	msgType, _ := msg["type"].(string)
+
+	switch msgType {
 	case "join_room":
 		if roomID, ok := msg["room"].(string); ok {
 			c.Hub.JoinRoom(roomID, c.Client)
@@ -79,14 +67,18 @@ func (c *MyServerClient) HandleMessage(message []byte) {
 		}
 	case "room_message":
 		if roomID, ok := msg["room"].(string); ok {
-			if _, inRoom := c.Rooms[roomID]; inRoom {
+			c.Mu.RLock()
+			_, inRoom := c.Rooms[roomID]
+			c.Mu.RUnlock()
+
+			if inRoom {
 				c.Hub.Broadcast <- common.BroadcastMessage{
 					Room:    roomID,
 					Message: message,
 					Sender:  c.Client,
 				}
 			} else {
-				c.sendError("Not in room")
+				c.sendError("You are not a member of this room")
 			}
 		}
 	case "private_message":

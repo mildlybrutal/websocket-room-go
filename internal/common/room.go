@@ -32,6 +32,10 @@ func (r *Room) AddClient(client *Client) {
 	r.Mu.Lock()
 	defer r.Mu.Unlock()
 
+	if r.Clients == nil {
+		r.Clients = make(map[*Client]bool)
+	}
+
 	r.Clients[client] = true
 }
 

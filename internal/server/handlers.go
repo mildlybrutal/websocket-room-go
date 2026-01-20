@@ -2,7 +2,6 @@ package server
 
 import (
 	"fmt"
-	"log"
 	"net/http"
 	"time"
 
@@ -14,56 +13,6 @@ var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
 	CheckOrigin:     func(r *http.Request) bool { return true },
-}
-
-func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
-	//upgrading websockets
-	conn, err := upgrader.Upgrade(w, r, nil)
-
-	if err != nil {
-		log.Printf("Failed to upgrade: %v", err)
-		return
-	}
-
-	defer conn.Close()
-
-	welcome := common.Message{
-		Type:    "welcome",
-		Content: "Connected to WebSocket server",
-	}
-
-	err = conn.WriteJSON(welcome)
-
-	if err := conn.WriteJSON(welcome); err != nil {
-		log.Printf("Error sending welcome: %v", err)
-		return
-	}
-
-	for {
-		var msg common.Message
-		err := conn.ReadJSON(&msg)
-
-		if err != nil {
-			if websocket.IsUnexpectedCloseError(err,
-				websocket.CloseGoingAway,
-				websocket.CloseAbnormalClosure) {
-				log.Printf("Websocket error: %v", err)
-			}
-			break
-		}
-
-		log.Printf("Recieved: %+v", msg)
-
-		response := common.Message{
-			Type:    "echo",
-			Content: msg.Content,
-		}
-
-		if err := conn.WriteJSON(response); err != nil {
-			log.Printf("Write error: %v", err)
-			break
-		}
-	}
 }
 
 var MainHub = common.NewHub()
