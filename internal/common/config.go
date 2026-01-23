@@ -35,6 +35,16 @@ type WSConfig struct {
 	EnableCompression bool          `mapstructure:"enable_compression"`
 }
 
+type DatabaseConfig struct {
+	Host     string `mapstructure:"host"`
+	Port     string `mapstructure:"port"`
+	Password string `mapstructure:"password"`
+	User     string `mapstructure:"user"`
+	DBName   string `mapstructure:"db_name"`
+	SSLMode  string `mapstructure:"ssl_mode"`
+	MaxCons  int    `mapstructure:"max_connections"`
+}
+
 type RedisConfig struct {
 	Host     string `mapstructure:"host"`
 	Port     int    `mapstructure:"port"`
