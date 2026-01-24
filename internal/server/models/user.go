@@ -7,11 +7,11 @@ import (
 )
 
 type User struct {
-	ID         uint      `gorm:"primary key;autoincrement" json:"id"`
-	Username   string    `json:"username"`
-	Email      string    `json:"email"`
-	Avatar_url string    `json:"avatar_url"`
-	Created_at time.Time `json:"created_at"`
+	ID         uint       `gorm:"primary key;autoincrement" json:"id"`
+	Username   *string    `json:"username"`
+	Email      *string    `json:"email"`
+	Avatar_url *string    `json:"avatar_url"`
+	Created_at *time.Time `json:"created_at"`
 }
 
 func MigrateUser(db *gorm.DB) error {
