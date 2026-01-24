@@ -3,9 +3,11 @@ package server
 import (
 	"encoding/json"
 	"log"
+	"strconv"
 
 	"github.com/gorilla/websocket"
 	"github.com/mildlybrutal/websocketGo/internal/common"
+	"github.com/mildlybrutal/websocketGo/internal/server/models"
 )
 
 type MyServerClient struct {
@@ -66,19 +68,26 @@ func (c *MyServerClient) HandleMessage(message []byte) {
 			c.Hub.LeaveRoom(c.Client, roomID)
 		}
 	case "room_message":
-		if roomID, ok := msg["room"].(string); ok {
-			c.Mu.RLock()
-			_, inRoom := c.Rooms[roomID]
-			c.Mu.RUnlock()
+		if roomIDStr, ok := msg["room"].(string); ok {
+			roomID, _ := strconv.ParseUint(roomIDStr, 10, 32)
+			content, _ := msg["content"].(string)
 
-			if inRoom {
-				c.Hub.Broadcast <- common.BroadcastMessage{
-					Room:    roomID,
-					Message: message,
-					Sender:  c.Client,
-				}
-			} else {
-				c.sendError("You are not a member of this room")
+			// Persist to DB
+			chatEntry := &models.Chat{
+				RoomID:   uint(roomID),
+				SenderID: 1,
+				Content:  content,
+			}
+
+			if err := c.Hub.ChatRepo.SaveMessage(chatEntry); err != nil {
+				log.Printf("DB Save Error: %v", err)
+			}
+
+			// Broadcast
+			c.Hub.Broadcast <- common.BroadcastMessage{
+				Room:    roomIDStr,
+				Message: message,
+				Sender:  c.Client,
 			}
 		}
 	case "private_message":

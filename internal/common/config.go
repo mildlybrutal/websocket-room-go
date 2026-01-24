@@ -10,6 +10,7 @@ import (
 type Config struct {
 	Server     ServerConfig     `mapstructure:"server"`
 	Websocket  WSConfig         `mapstructure:"websocket"`
+	Database   DatabaseConfig   `mapstructure:"database"`
 	Redis      RedisConfig      `mapstructure:"redis"`
 	Monitoring MonitoringConfig `mapstructure:"monitoring"`
 	Security   SecurityConfig   `mapstructure:"security"`

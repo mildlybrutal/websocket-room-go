@@ -1,17 +1,14 @@
 package models
 
 import (
-	"time"
-
 	"gorm.io/gorm"
 )
 
 type Room struct {
-	ID        uint       `gorm:"primary key;autoincrement" json:"id"`
-	Name      *string    `json:"name"`
-	OwnerID   *int       `gorm"foreignkey:user;references:ID" json:"owner_id`
-	IsPrivate *bool      `json:"is_private"`
-	CreatedAt *time.Time `json:"created_at"`
+	gorm.Model
+	Name    string `gorm:"uniqueIndex;not null" json:"name"`
+	OwnerID uint   `gorm:"not null" json:"owner_id"`
+	Owner   User   `gorm:"foreignKey:OwnerID"`
 }
 
 func MigrateRoom(db *gorm.DB) error {

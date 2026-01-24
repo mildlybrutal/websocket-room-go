@@ -3,8 +3,11 @@ package common
 import (
 	"encoding/json"
 	"log"
+	"strconv"
 	"sync"
 	"time"
+
+	"github.com/mildlybrutal/websocketGo/internal/server/models"
 )
 
 type Hub struct {
@@ -14,6 +17,11 @@ type Hub struct {
 	Register   chan *Client
 	Unregister chan *Client
 	Mu         sync.RWMutex
+
+	ChatRepo interface {
+		SaveMessage(chat *models.Chat) error
+		GetRoomHistory(roomID uint, limit int) ([]models.Chat, error)
+	}
 }
 
 func NewHub() *Hub {
@@ -123,6 +131,22 @@ func (h *Hub) JoinRoom(RoomID string, client *Client) error {
 	client.Rooms[RoomID] = true
 
 	client.Mu.Unlock()
+
+	id, _ := strconv.ParseUint(RoomID, 10, 32)
+
+	history, err := h.ChatRepo.GetRoomHistory(uint(id), 50)
+
+	if err == nil {
+		for _, msg := range history {
+			historyJSON, _ := json.Marshal(map[string]any{
+				"type":    "history_message",
+				"content": msg.Content,
+				"sender":  msg.SenderID,
+				"time":    msg.CreatedAt,
+			})
+			client.Send <- historyJSON
+		}
+	}
 
 	notification, _ := json.Marshal(map[string]any{
 		"type":   "user_joined_room",
