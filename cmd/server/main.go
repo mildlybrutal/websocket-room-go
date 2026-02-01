@@ -29,6 +29,7 @@ func main() {
 
 	userRepo := repository.NewUserRepository(db)
 
+	http.HandleFunc("/sign-up", server.SignUpHandler(userRepo))
 	http.HandleFunc("/login", server.LoginHandler(userRepo, cfg))
 	http.HandleFunc("/ws", server.HandleConnections)
 
