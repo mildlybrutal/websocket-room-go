@@ -27,6 +27,9 @@ func main() {
 
 	go server.MainHub.Run()
 
+	userRepo := repository.NewUserRepository(db)
+
+	http.HandleFunc("/login", server.LoginHandler(userRepo, cfg))
 	http.HandleFunc("/ws", server.HandleConnections)
 
 	fmt.Println("Websocket server started at port 8080")

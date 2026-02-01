@@ -18,6 +18,21 @@ var upgrader = websocket.Upgrader{
 var MainHub = common.NewHub()
 
 func HandleConnections(w http.ResponseWriter, r *http.Request) {
+	cfg, _ := common.LoadConfig(".")
+
+	var userID uint
+
+	if cfg.Security.RequireAuth {
+		token := r.URL.Query().Get("token")
+		id, err := ValidateToken(token, cfg.Security.JWTSecret)
+
+		if err != nil {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+		userID = id
+	}
+
 	conn, err := upgrader.Upgrade(w, r, nil)
 
 	if err != nil {
@@ -31,11 +46,12 @@ func HandleConnections(w http.ResponseWriter, r *http.Request) {
 	}
 
 	baseClient := &common.Client{
-		ID:    clientID,
-		Conn:  conn,
-		Send:  make(chan []byte, 256),
-		Hub:   MainHub,
-		Rooms: make(map[string]bool),
+		ID:     clientID,
+		UserID: userID,
+		Conn:   conn,
+		Send:   make(chan []byte, 256),
+		Hub:    MainHub,
+		Rooms:  make(map[string]bool),
 	}
 
 	serverClient := &MyServerClient{

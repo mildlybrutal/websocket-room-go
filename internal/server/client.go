@@ -75,7 +75,7 @@ func (c *MyServerClient) HandleMessage(message []byte) {
 			// Persist to DB
 			chatEntry := &models.Chat{
 				RoomID:   uint(roomID),
-				SenderID: 1,
+				SenderID: c.UserID,
 				Content:  content,
 			}
 
