@@ -18,7 +18,7 @@ type Config struct {
 
 type ServerConfig struct {
 	Host         string `mapstructure:"host"`
-	Port         string `mapstruture:"port"`
+	Port         string `mapstructure:"port"`
 	ReadTimeout  string `mapstructure:"read_timeout"`
 	WriteTimeout string `mapstructure:"write_timeout"`
 	IdleTimeout  string `mapstructure:"idle_timeout"`

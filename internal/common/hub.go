@@ -3,7 +3,6 @@ package common
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log"
 	"strconv"
 	"sync"
@@ -21,7 +20,10 @@ type Hub struct {
 	Unregister chan *Client
 
 	RedisClient         *redis.Client
-	activeSubscriptions map[string]bool
+	activeSubscriptions map[string]context.CancelFunc
+
+	ctx    context.Context
+	cancel context.CancelFunc
 
 	Mu sync.RWMutex
 
@@ -32,13 +34,16 @@ type Hub struct {
 }
 
 func NewHub() *Hub {
+	ctx, cancel := context.WithCancel(context.Background())
 	return &Hub{
 		Clients:             make(map[string]*Client),
 		Rooms:               make(map[string]*Room),
 		Broadcast:           make(chan BroadcastMessage),
 		Register:            make(chan *Client),
 		Unregister:          make(chan *Client),
-		activeSubscriptions: make(map[string]bool),
+		activeSubscriptions: make(map[string]context.CancelFunc),
+		ctx:                 ctx,
+		cancel:              cancel,
 	}
 }
 
@@ -65,6 +70,10 @@ func (h *Hub) Run() {
 					if room, exists := h.Rooms[roomID]; exists {
 						room.RemoveClient(client)
 						if room.IsEmpty() {
+							if cancelFunc, exists := h.activeSubscriptions[roomID]; exists {
+								cancelFunc()
+								delete(h.activeSubscriptions, roomID)
+							}
 							delete(h.Rooms, roomID)
 						}
 					}
@@ -84,57 +93,129 @@ func (h *Hub) Run() {
 
 }
 
-func (h *Hub) ListenToRedis(ctx context.Context, roomID string) {
-	pubsub := h.RedisClient.Subscribe(ctx, "room:"+roomID)
-	defer pubsub.Close()
+func (h *Hub) Shutdown() {
+	log.Println("Initiating hub shutdown...")
 
+	h.Mu.Lock()
+	for roomID, cancelFunc := range h.activeSubscriptions {
+		log.Printf("Stopping Redis listener for room: %s", roomID)
+		cancelFunc()
+	}
+	h.Mu.Unlock()
+
+	h.cancel()
+	log.Println("Hub shutdown complete")
+}
+
+func (h *Hub) ListenToRedis(roomID string) {
+	// Create cancellable context for this subscription
+	ctx, cancel := context.WithCancel(h.ctx)
+
+	// Register cancel function for later cleanup
+	h.Mu.Lock()
+	h.activeSubscriptions[roomID] = cancel
+	h.Mu.Unlock()
+
+	// Ensure cleanup on function exit
 	defer func() {
 		h.Mu.Lock()
 		delete(h.activeSubscriptions, roomID)
 		h.Mu.Unlock()
+
+		// Recover from any panics
+		if r := recover(); r != nil {
+			log.Printf("ERROR: Panic in Redis listener for room %s: %v", roomID, r)
+		}
+
+		log.Printf("Redis listener stopped for room: %s", roomID)
 	}()
 
-	ch := pubsub.Channel()
+	channel := "room:" + roomID
 
-	// This loop runs until the channel is closed or context is cancelled
-	for msg := range ch {
-		// We broadcast to LOCAL clients only
-		// The message originated from Redis (potentially another server)
-		h.broadcastToLocalClients(roomID, []byte(msg.Payload))
+	// Subscribe to Redis channel
+	pubsub := h.RedisClient.Subscribe(ctx, channel)
+	defer pubsub.Close()
+
+	// Wait for subscription confirmation with timeout
+	subCtx, subCancel := context.WithTimeout(ctx, 5*time.Second)
+	if _, err := pubsub.Receive(subCtx); err != nil {
+		subCancel()
+		log.Printf("ERROR: Failed to subscribe to Redis channel %s: %v", channel, err)
+		return
 	}
+	subCancel()
 
-	// Cleanup when loop exits
-	h.Mu.Lock()
-	delete(h.activeSubscriptions, roomID)
-	h.Mu.Unlock()
-}
+	log.Printf("✓ Started Redis listener for room: %s", roomID)
 
-func (h *Hub) broadcastToLocalClients(roomID string, message []byte) {
-	h.Mu.RLock()
-	defer h.Mu.RUnlock()
+	// Get message channel
+	msgChan := pubsub.Channel()
 
-	if room, ok := h.Rooms[roomID]; ok {
-		for client := range room.Clients {
-			select {
-			case client.Send <- message:
-			default:
-				close(client.Send)
-				delete(room.Clients, client)
+	// Message processing loop
+	for {
+		select {
+		case <-ctx.Done():
+			// Graceful shutdown or room cleanup
+			return
+
+		case msg, ok := <-msgChan:
+			// Channel closed
+			if !ok {
+				log.Printf("Redis channel closed for room: %s", roomID)
+				return
 			}
+
+			// Nil message - skip
+			if msg == nil {
+				continue
+			}
+
+			// Validate payload
+			if len(msg.Payload) == 0 {
+				log.Printf("Warning: Empty payload for room %s", roomID)
+				continue
+			}
+
+			// Sanity check - prevent extremely large messages
+			if len(msg.Payload) > 10*1024*1024 { // 10MB
+				log.Printf("Warning: Message too large (%d bytes) for room %s",
+					len(msg.Payload), roomID)
+				continue
+			}
+
+			// Broadcast to all local clients in this room
+			h.broadcastToLocalClients(roomID, []byte(msg.Payload))
 		}
 	}
 }
 
-func (h *Hub) handleIncomingMessage(msg Message) {
-	ctx := context.Background()
+func (h *Hub) broadcastToLocalClients(roomID string, message []byte) {
+	h.Mu.RLock()
+	room, exists := h.Rooms[roomID]
+	h.Mu.RUnlock()
 
-	payload, _ := json.Marshal(msg)
+	// Room doesn't exist locally - this is normal in multi-server setup
+	if !exists {
+		return
+	}
 
-	channel := fmt.Sprintf("room: %s", msg.RoomID)
+	room.Mu.RLock()
+	defer room.Mu.RUnlock()
 
-	err := h.RedisClient.Publish(ctx, channel, payload).Err()
-	if err != nil {
-		log.Printf("Failed to publish to Redis: %v", err)
+	// Send to all clients in the room
+	successCount := 0
+	for client := range room.Clients {
+		select {
+		case client.Send <- message:
+			successCount++
+		default:
+			// Buffer full - log but don't block
+			log.Printf("Warning: Client %s buffer full (room: %s)", client.ID, roomID)
+		}
+	}
+
+	// Log broadcast statistics
+	if successCount > 0 {
+		log.Printf("Broadcasted to %d clients in room %s", successCount, roomID)
 	}
 }
 
@@ -177,13 +258,12 @@ func (h *Hub) JoinRoom(RoomID string, client *Client) error {
 			ID:      RoomID,
 			Clients: make(map[*Client]bool),
 		}
-
 		h.Rooms[RoomID] = room
 	}
 
-	if !h.activeSubscriptions[RoomID] {
-		go h.ListenToRedis(context.Background(), RoomID)
-		h.activeSubscriptions[RoomID] = true
+	// Start Redis listener if not already active
+	if _, subscribed := h.activeSubscriptions[RoomID]; !subscribed {
+		go h.ListenToRedis(RoomID)
 	}
 
 	h.Mu.Unlock()
@@ -191,17 +271,14 @@ func (h *Hub) JoinRoom(RoomID string, client *Client) error {
 	room.AddClient(client)
 
 	client.Mu.Lock()
-
 	if client.Rooms == nil {
 		client.Rooms = make(map[string]bool)
 	}
-
 	client.Rooms[RoomID] = true
-
 	client.Mu.Unlock()
 
+	// Load chat history
 	id, _ := strconv.ParseUint(RoomID, 10, 32)
-
 	history, err := h.ChatRepo.GetRoomHistory(uint(id), 50)
 
 	if err == nil {
@@ -216,20 +293,22 @@ func (h *Hub) JoinRoom(RoomID string, client *Client) error {
 		}
 	}
 
+	// Notify others via Redis
 	notification, _ := json.Marshal(map[string]any{
 		"type":   "user_joined_room",
 		"room":   RoomID,
 		"userId": client.ID,
 	})
 
-	room.Broadcast(notification, client)
+	ctx := context.Background()
+	h.RedisClient.Publish(ctx, "room:"+RoomID, notification)
 
+	// Send room info to joining client
 	roomInfo, _ := json.Marshal(map[string]any{
 		"type":    "room_joined",
 		"room":    RoomID,
 		"members": room.GetMemberIDs(),
 	})
-
 	client.Send <- roomInfo
 
 	return nil
@@ -237,19 +316,15 @@ func (h *Hub) JoinRoom(RoomID string, client *Client) error {
 
 func (h *Hub) LeaveRoom(client *Client, RoomID string) {
 	h.Mu.Lock()
-	defer h.Mu.Unlock()
-
 	room, exists := h.Rooms[RoomID]
-
 	if !exists {
+		h.Mu.Unlock()
 		return
 	}
+	h.Mu.Unlock()
 
 	room.RemoveClient(client)
 
-	if room.IsEmpty() {
-		delete(h.Rooms, RoomID)
-	}
 	client.Mu.Lock()
 	delete(client.Rooms, RoomID)
 	client.Mu.Unlock()
@@ -260,5 +335,16 @@ func (h *Hub) LeaveRoom(client *Client, RoomID string) {
 		"userID": client.ID,
 	})
 
-	room.Broadcast(notification, nil)
+	ctx := context.Background()
+	h.RedisClient.Publish(ctx, "room:"+RoomID, notification)
+
+	h.Mu.Lock()
+	if room.IsEmpty() {
+		if cancelFunc, exists := h.activeSubscriptions[RoomID]; exists {
+			cancelFunc()
+			delete(h.activeSubscriptions, RoomID)
+		}
+		delete(h.Rooms, RoomID)
+	}
+	h.Mu.Unlock()
 }

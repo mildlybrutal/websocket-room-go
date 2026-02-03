@@ -10,7 +10,7 @@ import (
 
 func InitRedis(cfg *common.RedisConfig) (*redis.Client, error) {
 	rdb := redis.NewClient(&redis.Options{
-		Addr:     fmt.Sprintf("%s %d", cfg.Host, cfg.Port),
+		Addr:     fmt.Sprintf("%s:%d", cfg.Host, cfg.Port),
 		Password: cfg.Password,
 		DB:       cfg.DB,
 		Protocol: 2,

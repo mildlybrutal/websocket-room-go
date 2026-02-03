@@ -92,11 +92,11 @@ func (c *MyServerClient) HandleMessage(message []byte) {
 				log.Printf("Redis Publish Error: %v", err)
 			}
 			// Broadcast
-			c.Hub.Broadcast <- common.BroadcastMessage{
-				Room:    roomIDStr,
-				Message: message,
-				Sender:  c.Client,
-			}
+			// c.Hub.Broadcast <- common.BroadcastMessage{
+			// 	Room:    roomIDStr,
+			// 	Message: message,
+			// 	Sender:  c.Client,
+			// }
 		}
 	case "private_message":
 		if targetID, ok := msg["to"].(string); ok {
