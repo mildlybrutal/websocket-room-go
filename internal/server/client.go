@@ -56,6 +56,8 @@ func (c *MyServerClient) HandleMessage(message []byte) {
 		return
 	}
 
+	err := c.Hub.RedisClient.Publish(ctx, c.RoomTD, msg)
+
 	msgType, _ := msg["type"].(string)
 
 	switch msgType {

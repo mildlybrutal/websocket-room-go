@@ -1,22 +1,27 @@
 package common
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/mildlybrutal/websocketGo/internal/server/models"
+	"github.com/redis/go-redis/v9"
 )
 
 type Hub struct {
-	Clients    map[string]*Client
-	Rooms      map[string]*Room
-	Broadcast  chan BroadcastMessage
-	Register   chan *Client
-	Unregister chan *Client
-	Mu         sync.RWMutex
+	Clients     map[string]*Client
+	Rooms       map[string]*Room
+	Broadcast   chan BroadcastMessage
+	Register    chan *Client
+	Unregister  chan *Client
+	RedisClient *redis.Client
+	Mu          sync.RWMutex
 
 	ChatRepo interface {
 		SaveMessage(chat *models.Chat) error
@@ -72,6 +77,52 @@ func (h *Hub) Run() {
 		case <-ticker.C:
 			h.cleanup()
 		}
+	}
+
+}
+
+func (h *Hub) ListenToRedis(ctx context.Context, roomID string) {
+	pubsub := h.RedisClient.Subscribe(ctx, "room:"+roomID)
+	defer pubsub.Close()
+
+	ch := pubsub.Channel()
+
+	for msg := range ch {
+
+		roomID := strings.TrimPrefix(msg.Channel, "room:")
+
+		var chatMsg Message
+
+		if err := json.Unmarshal([]byte(msg.Payload), &chatMsg); err != nil {
+			continue
+		}
+		h.broadcastToLocalClients(roomID, chatMsg)
+	}
+}
+
+func (h *Hub) broadcastToLocalClients(roomID string, msg Message) {
+	if room, ok := h.Rooms[roomID]; ok {
+		for client := range room.Clients {
+			select {
+			case client.Send <- msg:
+			default:
+				close(client.Send)
+				delete(room.Clients, client)
+			}
+		}
+	}
+}
+
+func (h *Hub) handleIncomingMessage(msg Message) {
+	ctx := context.Background()
+
+	payload, _ := json.Marshal(msg)
+
+	channel := fmt.Sprintf("room: %s", msg.RoomID)
+
+	err := h.RedisClient.Publish(ctx, channel, payload).Err()
+	if err != nil {
+		log.Printf("Failed to publish to Redis: %v", err)
 	}
 }
 
