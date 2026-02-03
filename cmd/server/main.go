@@ -15,6 +15,12 @@ func main() {
 
 	cfg, _ := common.LoadConfig(".")
 
+	rdb, err := storage.InitRedis(&cfg.Redis)
+
+	if err != nil {
+		log.Fatalf("Redis init failed: %v", err)
+	}
+
 	db, err := storage.NewConnection(&cfg.Database)
 
 	if err != nil {
@@ -24,6 +30,7 @@ func main() {
 	chatRepo := repository.NewChatRepository(db)
 
 	server.MainHub.ChatRepo = chatRepo
+	server.MainHub.RedisClient = rdb
 
 	go server.MainHub.Run()
 

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -15,13 +14,16 @@ import (
 )
 
 type Hub struct {
-	Clients     map[string]*Client
-	Rooms       map[string]*Room
-	Broadcast   chan BroadcastMessage
-	Register    chan *Client
-	Unregister  chan *Client
-	RedisClient *redis.Client
-	Mu          sync.RWMutex
+	Clients    map[string]*Client
+	Rooms      map[string]*Room
+	Broadcast  chan BroadcastMessage
+	Register   chan *Client
+	Unregister chan *Client
+
+	RedisClient         *redis.Client
+	activeSubscriptions map[string]bool
+
+	Mu sync.RWMutex
 
 	ChatRepo interface {
 		SaveMessage(chat *models.Chat) error
@@ -31,11 +33,12 @@ type Hub struct {
 
 func NewHub() *Hub {
 	return &Hub{
-		Clients:    make(map[string]*Client),
-		Rooms:      make(map[string]*Room),
-		Broadcast:  make(chan BroadcastMessage),
-		Register:   make(chan *Client),
-		Unregister: make(chan *Client),
+		Clients:             make(map[string]*Client),
+		Rooms:               make(map[string]*Room),
+		Broadcast:           make(chan BroadcastMessage),
+		Register:            make(chan *Client),
+		Unregister:          make(chan *Client),
+		activeSubscriptions: make(map[string]bool),
 	}
 }
 
@@ -85,26 +88,35 @@ func (h *Hub) ListenToRedis(ctx context.Context, roomID string) {
 	pubsub := h.RedisClient.Subscribe(ctx, "room:"+roomID)
 	defer pubsub.Close()
 
+	defer func() {
+		h.Mu.Lock()
+		delete(h.activeSubscriptions, roomID)
+		h.Mu.Unlock()
+	}()
+
 	ch := pubsub.Channel()
 
+	// This loop runs until the channel is closed or context is cancelled
 	for msg := range ch {
-
-		roomID := strings.TrimPrefix(msg.Channel, "room:")
-
-		var chatMsg Message
-
-		if err := json.Unmarshal([]byte(msg.Payload), &chatMsg); err != nil {
-			continue
-		}
-		h.broadcastToLocalClients(roomID, chatMsg)
+		// We broadcast to LOCAL clients only
+		// The message originated from Redis (potentially another server)
+		h.broadcastToLocalClients(roomID, []byte(msg.Payload))
 	}
+
+	// Cleanup when loop exits
+	h.Mu.Lock()
+	delete(h.activeSubscriptions, roomID)
+	h.Mu.Unlock()
 }
 
-func (h *Hub) broadcastToLocalClients(roomID string, msg Message) {
+func (h *Hub) broadcastToLocalClients(roomID string, message []byte) {
+	h.Mu.RLock()
+	defer h.Mu.RUnlock()
+
 	if room, ok := h.Rooms[roomID]; ok {
 		for client := range room.Clients {
 			select {
-			case client.Send <- msg:
+			case client.Send <- message:
 			default:
 				close(client.Send)
 				delete(room.Clients, client)
@@ -167,6 +179,11 @@ func (h *Hub) JoinRoom(RoomID string, client *Client) error {
 		}
 
 		h.Rooms[RoomID] = room
+	}
+
+	if !h.activeSubscriptions[RoomID] {
+		go h.ListenToRedis(context.Background(), RoomID)
+		h.activeSubscriptions[RoomID] = true
 	}
 
 	h.Mu.Unlock()

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"strconv"
@@ -56,8 +57,6 @@ func (c *MyServerClient) HandleMessage(message []byte) {
 		return
 	}
 
-	err := c.Hub.RedisClient.Publish(ctx, c.RoomTD, msg)
-
 	msgType, _ := msg["type"].(string)
 
 	switch msgType {
@@ -85,6 +84,13 @@ func (c *MyServerClient) HandleMessage(message []byte) {
 				log.Printf("DB Save Error: %v", err)
 			}
 
+			redisMsg, _ := json.Marshal(msg)
+
+			err := c.Hub.RedisClient.Publish(context.Background(), "room:"+roomIDStr, redisMsg).Err()
+
+			if err != nil {
+				log.Printf("Redis Publish Error: %v", err)
+			}
 			// Broadcast
 			c.Hub.Broadcast <- common.BroadcastMessage{
 				Room:    roomIDStr,
