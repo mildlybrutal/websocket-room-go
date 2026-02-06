@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/mildlybrutal/websocketGo/internal/common"
+	"github.com/mildlybrutal/websocketGo/internal/middleware"
 	"github.com/mildlybrutal/websocketGo/internal/repository"
 	"github.com/mildlybrutal/websocketGo/internal/server"
 	"github.com/mildlybrutal/websocketGo/internal/storage"
@@ -31,14 +32,30 @@ func main() {
 
 	server.MainHub.ChatRepo = chatRepo
 	server.MainHub.RedisClient = rdb
-
 	go server.MainHub.Run()
 
 	userRepo := repository.NewUserRepository(db)
 
 	http.HandleFunc("/sign-up", server.SignUpHandler(userRepo))
 	http.HandleFunc("/login", server.LoginHandler(userRepo, cfg))
+	//protected
 	http.HandleFunc("/ws", server.HandleConnections)
+
+	http.HandleFunc("/api/profile", middleware.AuthMiddleware(
+		server.GetUserProfileHandler(userRepo),
+	))
+
+	http.HandleFunc("/api/room/history", middleware.AuthMiddleware(
+		server.GetRoomHistoryHandler(chatRepo),
+	))
+
+	http.HandleFunc("/api/room/create", middleware.AuthMiddleware(
+		server.CreateRoomHandler(roomRepo),
+	))
+
+	http.HandleFunc("/api/auth/refresh", middleware.AuthMiddleware(
+		server.RefreshTokenHandler(),
+	))
 
 	fmt.Println("Websocket server started at port 8080")
 

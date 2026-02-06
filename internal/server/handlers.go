@@ -7,6 +7,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/mildlybrutal/websocketGo/internal/common"
+	"github.com/mildlybrutal/websocketGo/internal/middleware"
 )
 
 var upgrader = websocket.Upgrader{
@@ -24,7 +25,7 @@ func HandleConnections(w http.ResponseWriter, r *http.Request) {
 
 	if cfg.Security.RequireAuth {
 		token := r.URL.Query().Get("token")
-		id, err := ValidateToken(token, cfg.Security.JWTSecret)
+		id, err := middleware.ValidateToken(token, cfg.Security.JWTSecret)
 
 		if err != nil {
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
