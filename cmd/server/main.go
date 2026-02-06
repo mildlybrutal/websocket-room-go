@@ -29,12 +29,13 @@ func main() {
 	}
 
 	chatRepo := repository.NewChatRepository(db)
+	roomRepo := repository.NewRoomRepository(db)
+	userRepo := repository.NewUserRepository(db)
 
 	server.MainHub.ChatRepo = chatRepo
 	server.MainHub.RedisClient = rdb
-	go server.MainHub.Run()
 
-	userRepo := repository.NewUserRepository(db)
+	go server.MainHub.Run()
 
 	http.HandleFunc("/sign-up", server.SignUpHandler(userRepo))
 	http.HandleFunc("/login", server.LoginHandler(userRepo, cfg))
