@@ -1,9 +1,14 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/mildlybrutal/websocketGo/internal/common"
 	"github.com/mildlybrutal/websocketGo/internal/middleware"
@@ -58,11 +63,36 @@ func main() {
 		server.RefreshTokenHandler(cfg),
 	))
 
-	fmt.Println("Websocket server started at port 8080")
-
-	err = http.ListenAndServe(":8080", nil)
-
-	if err != nil {
-		log.Fatal(err)
+	srv := &http.Server{
+		Addr:         ":8080",
+		ReadTimeout:  15 * time.Second,
+		WriteTimeout: 15 * time.Second,
+		IdleTimeout:  60 * time.Second,
 	}
+
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+
+	go func() {
+		fmt.Println("WebSocket server started at http://localhost:8080")
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatal(err)
+		}
+	}()
+
+	<-stop
+	log.Println("Shutting down server")
+
+	server.MainHub.Shutdown()
+	log.Println("hub shutdown")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Printf("Server shutdown error: %v", err)
+	}
+
+	log.Println("Server stopped gracefully")
+
 }
