@@ -47,7 +47,7 @@ func main() {
 	))
 
 	http.HandleFunc("/api/room/history", middleware.AuthMiddleware(
-		server.GetRoomHistoryHandler(chatRepo),
+		server.GetRoomHistoryHandler(chatRepo, roomRepo),
 	))
 
 	http.HandleFunc("/api/room/create", middleware.AuthMiddleware(
@@ -55,7 +55,7 @@ func main() {
 	))
 
 	http.HandleFunc("/api/auth/refresh", middleware.AuthMiddleware(
-		server.RefreshTokenHandler(),
+		server.RefreshTokenHandler(cfg),
 	))
 
 	fmt.Println("Websocket server started at port 8080")

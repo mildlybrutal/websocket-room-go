@@ -5,7 +5,10 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"time"
 
+	"github.com/golang-jwt/jwt/v5"
+	"github.com/mildlybrutal/websocketGo/internal/common"
 	"github.com/mildlybrutal/websocketGo/internal/middleware"
 	"github.com/mildlybrutal/websocketGo/internal/repository"
 )
@@ -74,7 +77,7 @@ func CreateRoomHandler(roomRepo *repository.RoomRepository) http.HandlerFunc {
 }
 
 // GetRoomHistoryHandler returns chat history for a room (protected)
-func GetRoomHistoryHandler(chatRepo *repository.ChatRepository) http.HandlerFunc {
+func GetRoomHistoryHandler(chatRepo *repository.ChatRepository, roomRepo *repository.RoomRepository) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID, ok := middleware.RequireAuth(r, w)
 		if !ok {
@@ -95,8 +98,18 @@ func GetRoomHistoryHandler(chatRepo *repository.ChatRepository) http.HandlerFunc
 		}
 
 		// TODO: Check if user has access to this room
-		// hasAccess := checkRoomAccess(userID, uint(roomID))
-		_ = userID // Use userID to avoid unused variable error
+		hasAccess, err := roomRepo.CheckUserRoomAccess(userID, uint(roomID))
+
+		if err != nil {
+			log.Printf("Error checking room access: %v", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+
+		if !hasAccess {
+			http.Error(w, "You don't have access to this room", http.StatusForbidden)
+			return
+		}
 
 		// Get message limit from query (default 50, max 100)
 		limit := 50
@@ -126,7 +139,7 @@ func GetRoomHistoryHandler(chatRepo *repository.ChatRepository) http.HandlerFunc
 }
 
 // RefreshTokenHandler generates a new JWT token (requires valid token)
-func RefreshTokenHandler() http.HandlerFunc {
+func RefreshTokenHandler(cfg *common.Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID, ok := middleware.GetUserIDFromContext(r)
 		if !ok || userID == 0 {
@@ -136,14 +149,27 @@ func RefreshTokenHandler() http.HandlerFunc {
 
 		username, _ := middleware.GetUsernameFromContext(r)
 
-		// TODO: Generate new token using the same logic as LoginHandler
-		// For now, just return success
+		token := jwt.NewWithClaims(jwt.SigningMethodES256, jwt.MapClaims{
+			"sub":      userID,
+			"username": username,
+			"exp":      time.Now().Add(time.Hour * 24).Unix(),
+			"iat":      time.Now().Unix(),
+		})
+
+		tokenString, err := token.SignedString([]byte(cfg.Security.JWTSecret))
+
+		if err != nil {
+			http.Error(w, "Error generating token", http.StatusInternalServerError)
+			return
+		}
 
 		w.Header().Set("Content-Type", "application/json")
+
 		json.NewEncoder(w).Encode(map[string]any{
-			"message":  "Token refreshed",
-			"user_id":  userID,
-			"username": username,
+			"token":      tokenString,
+			"expires_in": 86400, // 24 hours
+			"user_id":    userID,
+			"username":   username,
 		})
 	}
 }

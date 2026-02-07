@@ -43,3 +43,18 @@ func (r *RoomRepository) GetAllRooms() ([]models.Room, error) {
 func (r *RoomRepository) DeleteRoom(roomID uint) error {
 	return r.db.Delete(&models.Room{}, roomID).Error
 }
+
+func (r *RoomRepository) CheckUserRoomAccess(userID uint, roomID uint) (bool, error) {
+	var members models.RoomMember
+
+	err := r.db.Where("user_id = ? AND room_id = ?", userID, roomID).First(&members).Error
+
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return false, nil
+		}
+		return false, err
+	}
+
+	return true, nil
+}
