@@ -1,0 +1,62 @@
+version: "3.8"
+
+services:
+    server:
+        build:
+            context: .
+            dockerfile: Dockerfile
+        container_name: websocket_server
+        restart: unless-stopped
+        ports:
+            - "${PORT}:${PORT}"
+        env_file:
+            - .env
+        environment:
+            - DB_HOST=postgres
+            - REDIS_ADDR=redis:6379
+        depends_on:
+            postgres:
+                condition: service_healthy
+            redis:
+                condition: service_started
+        networks:
+            - app-network
+
+    postgres:
+        image: postgres:15-alpine
+        container_name: websocket_postgres
+        restart: always
+        ports:
+            - "${DB_PORT}:5432"
+        environment:
+            POSTGRES_USER: ${DB_USER}
+            POSTGRES_PASSWORD: ${DB_PASSWORD}
+            POSTGRES_DB: ${DB_NAME}
+        volumes:
+            - postgres_data:/var/lib/postgresql/data
+        networks:
+            - app-network
+        healthcheck:
+            test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+            interval: 5s
+            timeout: 5s
+            retries: 5
+
+    redis:
+        image: redis:7-alpine
+        container_name: websocket_redis
+        restart: always
+        ports:
+            - "${REDIS_PORT}:6379"
+        volumes:
+            - redis_data:/data
+        networks:
+            - app-network
+
+networks:
+    app-network:
+        driver: bridge
+
+volumes:
+    postgres_data:
+    redis_data:
