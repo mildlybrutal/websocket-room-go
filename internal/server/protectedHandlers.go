@@ -149,7 +149,7 @@ func RefreshTokenHandler(cfg *common.Config) http.HandlerFunc {
 
 		username, _ := middleware.GetUsernameFromContext(r)
 
-		token := jwt.NewWithClaims(jwt.SigningMethodES256, jwt.MapClaims{
+		token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 			"sub":      userID,
 			"username": username,
 			"exp":      time.Now().Add(time.Hour * 24).Unix(),
