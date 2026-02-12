@@ -20,6 +20,7 @@ A scalable real-time chat system built with Go, WebSocket, Redis pub/sub, and Po
 - Token validation for WebSocket connections
 - HTML sanitization to prevent XSS
 - Input validation and rate limiting ready
+- Per-client rate limiting (configurable)
 
 ### Scalability
 - Horizontal scaling across multiple servers

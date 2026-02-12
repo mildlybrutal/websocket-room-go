@@ -7,14 +7,24 @@ import (
 	"log"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/mildlybrutal/websocketGo/internal/common"
 	"github.com/mildlybrutal/websocketGo/internal/server/models"
+	"golang.org/x/time/rate"
 )
 
 type MyServerClient struct {
 	*common.Client
+	limiter *rate.Limiter
+}
+
+func NewServerClient(baseClient *common.Client) *MyServerClient {
+	return &MyServerClient{
+		Client:  baseClient,
+		limiter: rate.NewLimiter(rate.Limit(10), 20),
+	}
 }
 
 func (c *MyServerClient) ReadPump() {
@@ -24,6 +34,7 @@ func (c *MyServerClient) ReadPump() {
 	}()
 
 	c.Conn.SetReadLimit(512 * 1024)
+	c.Conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 
 	for {
 		_, message, err := c.Conn.ReadMessage()
@@ -52,6 +63,13 @@ func (c *MyServerClient) WritePump() {
 }
 
 func (c *MyServerClient) HandleMessage(message []byte) {
+
+	if !c.limiter.Allow() {
+		c.sendError("rate limit exceeded")
+		log.Printf("Rate limit exceeded for client %s (user %d)", c.ID, c.UserID)
+		return
+	}
+
 	var msg map[string]any
 
 	if err := json.Unmarshal(message, &msg); err != nil {
