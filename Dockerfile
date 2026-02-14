@@ -1,4 +1,4 @@
-FROM golang:1.25-trixie AS builder
+FROM golang:1.25-alpine AS builder
 
 WORKDIR /app
 
@@ -8,8 +8,8 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -o main ./cmd/server/main.go
 
-FROM trixie:latest
-
+FROM alpine:3.23
+    
 WORKDIR /root/
 
 COPY --from=builder /app/main .

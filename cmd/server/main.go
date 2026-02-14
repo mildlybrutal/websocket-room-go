@@ -14,6 +14,7 @@ import (
 	"github.com/mildlybrutal/websocketGo/internal/middleware"
 	"github.com/mildlybrutal/websocketGo/internal/repository"
 	"github.com/mildlybrutal/websocketGo/internal/server"
+	"github.com/mildlybrutal/websocketGo/internal/server/models"
 	"github.com/mildlybrutal/websocketGo/internal/storage"
 )
 
@@ -37,6 +38,24 @@ func main() {
 	roomRepo := repository.NewRoomRepository(db)
 	userRepo := repository.NewUserRepository(db)
 
+	// Seed Data
+	systemUser, err := userRepo.GetOrCreateUser("system", "system@localhost")
+	if err != nil {
+		log.Printf("Failed to create system user: %v", err)
+	} else {
+		rooms := []string{"General", "Random", "Tech"}
+		for _, roomName := range rooms {
+			var room models.Room
+			if err := db.Where("name = ?", roomName).First(&room).Error; err != nil {
+				if err := roomRepo.CreateRoom(roomName, systemUser.ID); err != nil {
+					log.Printf("Failed to seed room %s: %v", roomName, err)
+				} else {
+					log.Printf("Seeded room: %s", roomName)
+				}
+			}
+		}
+	}
+
 	server.MainHub.ChatRepo = chatRepo
 	server.MainHub.RedisClient = rdb
 
@@ -45,7 +64,7 @@ func main() {
 	http.HandleFunc("/sign-up", server.SignUpHandler(userRepo))
 	http.HandleFunc("/login", server.LoginHandler(userRepo, cfg))
 	//protected
-	http.HandleFunc("/ws", server.HandleConnections)
+	http.HandleFunc("/ws", server.HandleConnections(userRepo))
 
 	http.HandleFunc("/api/profile", middleware.AuthMiddleware(
 		server.GetUserProfileHandler(userRepo),
@@ -59,12 +78,23 @@ func main() {
 		server.CreateRoomHandler(roomRepo),
 	))
 
+	http.HandleFunc("/api/rooms", middleware.AuthMiddleware(
+		server.GetRoomsHandler(roomRepo),
+	))
+
+	http.HandleFunc("/api/room/join", middleware.AuthMiddleware(
+		server.JoinRoomHandler(roomRepo),
+	))
+
 	http.HandleFunc("/api/auth/refresh", middleware.AuthMiddleware(
 		server.RefreshTokenHandler(cfg),
 	))
 
+	handler := middleware.CORSMiddleware(cfg)(http.DefaultServeMux)
+
 	srv := &http.Server{
 		Addr:         ":8080",
+		Handler:      handler,
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 15 * time.Second,
 		IdleTimeout:  60 * time.Second,

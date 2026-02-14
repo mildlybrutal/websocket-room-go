@@ -173,3 +173,59 @@ func RefreshTokenHandler(cfg *common.Config) http.HandlerFunc {
 		})
 	}
 }
+
+// GetRoomsHandler returns list of all rooms
+func GetRoomsHandler(roomRepo *repository.RoomRepository) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		_, ok := middleware.RequireAuth(r, w)
+		if !ok {
+			return
+		}
+
+		rooms, err := roomRepo.GetAllRooms()
+		if err != nil {
+			http.Error(w, "Failed to fetch rooms", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(rooms)
+	}
+}
+
+// JoinRoomHandler adds authenticated user to a room
+func JoinRoomHandler(roomRepo *repository.RoomRepository) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		userID, ok := middleware.RequireAuth(r, w)
+		if !ok {
+			return
+		}
+
+		var req struct {
+			RoomID uint `json:"room_id"`
+		}
+
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid request", http.StatusBadRequest)
+			return
+		}
+
+		if err := roomRepo.AddMember(req.RoomID, userID); err != nil {
+			log.Printf("Failed to join room: %v", err)
+			http.Error(w, "Failed to join room", http.StatusInternalServerError)
+			return
+		}
+
+		room, err := roomRepo.GetRoomByID(req.RoomID)
+		if err != nil {
+			http.Error(w, "Room not found", http.StatusNotFound)
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]any{
+			"message": "Joined room successfully",
+			"room":    room,
+		})
+	}
+}

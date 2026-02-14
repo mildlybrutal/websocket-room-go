@@ -1,39 +1,25 @@
-import "./App.css";
-import { ChatPanel } from "./components/ChatPanel";
-import { ConnectionPanel } from "./components/ConnectionPanel";
-import { LeftPanel } from "./components/LeftPanel";
-import { useChatSocket } from "./hooks/useChatSocket";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { AuthProvider } from "./context/AuthContext";
+import { Login } from "./components/Auth/Login";
+import { Signup } from "./components/Auth/Signup";
+import { MainLayout } from "./components/Layout/MainLayout";
+import { ChatArea } from "./components/Chat/ChatArea";
 
 function App() {
-    const chat = useChatSocket();
-
     return (
-        <div className="app-shell">
-            <LeftPanel />
-            <ChatPanel
-                roomId={chat.roomId}
-                onlineCount={chat.onlineCount}
-                connected={chat.connected}
-                messages={chat.messages}
-                typingUsers={chat.presence.typingUsers}
-                messageText={chat.messageText}
-                onInputChange={chat.handleInput}
-                onSendMessage={chat.sendMessage}
-            />
-            <ConnectionPanel
-                wsUrl={chat.wsUrl}
-                setWsUrl={chat.setWsUrl}
-                clientId={chat.clientId}
-                setClientId={chat.setClientId}
-                token={chat.token}
-                setToken={chat.setToken}
-                roomId={chat.roomId}
-                setRoomId={chat.setRoomId}
-                connected={chat.connected}
-                onConnect={chat.connect}
-                onJoinRoom={chat.joinRoom}
-            />
-        </div>
+        <AuthProvider>
+            <BrowserRouter>
+                <Routes>
+                    <Route path="/login" element={<Login />} />
+                    <Route path="/signup" element={<Signup />} />
+                    <Route path="/" element={<MainLayout />}>
+                        <Route path="room/:roomId" element={<ChatArea />} />
+                        <Route index element={<Navigate to="/room/general" replace />} />
+                    </Route>
+                    <Route path="*" element={<Navigate to="/" replace />} />
+                </Routes>
+            </BrowserRouter>
+        </AuthProvider>
     );
 }
 

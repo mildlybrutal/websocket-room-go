@@ -2,6 +2,7 @@ package common
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/spf13/viper"
@@ -90,6 +91,7 @@ func LoadConfig(path string) (*Config, error) {
 	}
 
 	viper.AutomaticEnv()
+	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 
 	var config Config
 	if err := viper.Unmarshal(&config); err != nil {
@@ -117,6 +119,21 @@ func SetDefaults() {
 	viper.SetDefault("websocket.write_wait", "10s")
 	viper.SetDefault("websocket.max_message_size", 512*1024) // 512KB
 	viper.SetDefault("websocket.enable_compression", true)
+
+	// Redis defaults
+	viper.SetDefault("redis.host", "localhost")
+	viper.SetDefault("redis.port", 6379)
+	viper.SetDefault("redis.password", "")
+	viper.SetDefault("redis.db", 0)
+
+	// Database defaults
+	viper.SetDefault("database.host", "postgres")
+	viper.SetDefault("database.port", "5432")
+	viper.SetDefault("database.user", "postgres")
+	viper.SetDefault("database.password", "password")
+	viper.SetDefault("database.db_name", "websocket_db")
+	viper.SetDefault("database.ssl_mode", "disable")
+	viper.SetDefault("database.max_connections", 20)
 
 	// Security defaults
 	viper.SetDefault("security.enable_tls", false)

@@ -12,7 +12,7 @@ import (
 )
 
 type LoginRequest struct {
-	Username string `json:"username"`
+	Email    string `json:"email"`
 	Password string `json:"password"`
 }
 
@@ -56,10 +56,10 @@ func LoginHandler(userRepo *repository.UserRepository, cfg *common.Config) http.
 			return
 		}
 
-		user, err := userRepo.GetByUsername(req.Username)
+		user, err := userRepo.GetByEmail(req.Email)
 
 		if err != nil || !user.CheckPassword(req.Password) {
-			http.Error(w, "Invalid username or password", http.StatusUnauthorized)
+			http.Error(w, "Invalid email or password", http.StatusUnauthorized)
 			return
 		}
 

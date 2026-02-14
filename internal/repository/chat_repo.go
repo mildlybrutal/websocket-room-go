@@ -20,6 +20,7 @@ func (r *ChatRepository) SaveMessage(chat *models.Chat) error {
 func (r *ChatRepository) GetRoomHistory(roomID uint, limit int) ([]models.Chat, error) {
 	var messages []models.Chat
 	err := r.db.Where("room_id = ?", roomID).
+		Preload("Sender").
 		Order("created_at asc").
 		Limit(limit).
 		Find(&messages).Error

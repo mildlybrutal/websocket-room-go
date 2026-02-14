@@ -27,6 +27,17 @@ func NewServerClient(baseClient *common.Client) *MyServerClient {
 	}
 }
 
+const (
+	// Time allowed to write a message to the peer.
+	writeWait = 10 * time.Second
+
+	// Time allowed to read the next pong message from the peer.
+	pongWait = 60 * time.Second
+
+	// Send pings to peer with this period. Must be less than pongWait.
+	pingPeriod = (pongWait * 9) / 10
+)
+
 func (c *MyServerClient) ReadPump() {
 	defer func() {
 		c.Hub.Unregister <- c.Client
@@ -34,7 +45,8 @@ func (c *MyServerClient) ReadPump() {
 	}()
 
 	c.Conn.SetReadLimit(512 * 1024)
-	c.Conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+	c.Conn.SetReadDeadline(time.Now().Add(pongWait))
+	c.Conn.SetPongHandler(func(string) error { c.Conn.SetReadDeadline(time.Now().Add(pongWait)); return nil })
 
 	for {
 		_, message, err := c.Conn.ReadMessage()
@@ -51,15 +63,38 @@ func (c *MyServerClient) ReadPump() {
 }
 
 func (c *MyServerClient) WritePump() {
-	defer c.Conn.Close()
+	ticker := time.NewTicker(pingPeriod)
+	defer func() {
+		ticker.Stop()
+		c.Conn.Close()
+	}()
 
-	for message := range c.Send {
-		if err := c.Conn.WriteMessage(websocket.TextMessage, message); err != nil {
-			return
+	for {
+		select {
+		case message, ok := <-c.Send:
+			c.Conn.SetWriteDeadline(time.Now().Add(writeWait))
+			if !ok {
+				// The hub closed the channel.
+				c.Conn.WriteMessage(websocket.CloseMessage, []byte{})
+				return
+			}
+
+			w, err := c.Conn.NextWriter(websocket.TextMessage)
+			if err != nil {
+				return
+			}
+			w.Write(message)
+
+			if err := w.Close(); err != nil {
+				return
+			}
+		case <-ticker.C:
+			c.Conn.SetWriteDeadline(time.Now().Add(writeWait))
+			if err := c.Conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				return
+			}
 		}
 	}
-
-	c.Conn.WriteMessage(websocket.CloseMessage, []byte{})
 }
 
 func (c *MyServerClient) HandleMessage(message []byte) {
@@ -154,13 +189,14 @@ func (c *MyServerClient) handleRoomMessage(msg map[string]any) {
 
 	// Prepare broadcast message
 	broadcastMsg := map[string]any{
-		"type":       "room_message",
-		"room":       roomIDStr,
-		"content":    content,
-		"sender":     c.UserID,
-		"sender_id":  c.ID,
-		"message_id": chatEntry.ID,
-		"timestamp":  chatEntry.CreatedAt.Unix(),
+		"type":        "room_message",
+		"room":        roomIDStr,
+		"content":     content,
+		"sender":      c.UserID,
+		"sender_id":   c.ID,
+		"sender_name": c.Username,
+		"message_id":  chatEntry.ID,
+		"timestamp":   chatEntry.CreatedAt.Unix(),
 	}
 
 	redisMsg, err := json.Marshal(broadcastMsg)

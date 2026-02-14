@@ -284,10 +284,11 @@ func (h *Hub) JoinRoom(RoomID string, client *Client) error {
 	if err == nil {
 		for _, msg := range history {
 			historyJSON, _ := json.Marshal(map[string]any{
-				"type":    "history_message",
-				"content": msg.Content,
-				"sender":  msg.SenderID,
-				"time":    msg.CreatedAt,
+				"type":        "history_message",
+				"content":     msg.Content,
+				"sender":      msg.SenderID,
+				"sender_name": msg.Sender.Username,
+				"time":        msg.CreatedAt,
 			})
 			client.Send <- historyJSON
 		}
