@@ -3,6 +3,7 @@ package common
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"strconv"
 	"sync"
@@ -145,7 +146,7 @@ func (h *Hub) ListenToRedis(roomID string) {
 	}
 	subCancel()
 
-	log.Printf("✓ Started Redis listener for room: %s", roomID)
+	log.Printf("Started Redis listener for room: %s", roomID)
 
 	// Get message channel
 	msgChan := pubsub.Channel()
@@ -348,4 +349,67 @@ func (h *Hub) LeaveRoom(client *Client, RoomID string) {
 		delete(h.Rooms, RoomID)
 	}
 	h.Mu.Unlock()
+}
+
+func (h *Hub) SetUserOnline(userID uint) error {
+	ctx := context.Background()
+	key := fmt.Sprintf("online: %d", userID)
+	return h.RedisClient.Set(ctx, key, "1", 30*time.Second).Err()
+}
+
+func (h *Hub) SetUserOffline(userID uint) error {
+	ctx := context.Background()
+	key := fmt.Sprintf("online: %d", userID)
+	return h.RedisClient.Del(ctx, key).Err()
+}
+
+func (h *Hub) IsUserOnline(userID uint) (bool, error) {
+	ctx := context.Background()
+	key := fmt.Sprintf("online:%d", userID)
+	result, err := h.RedisClient.Exists(ctx, key).Result()
+	return result > 0, err
+}
+
+func (h *Hub) GetOnlineUsers() ([]uint, error) {
+	ctx := context.Background()
+	keys, err := h.RedisClient.Keys(ctx, "online:*").Result()
+	if err != nil {
+		return nil, err
+	}
+
+	onlineUsers := make([]uint, 0, len(keys))
+	for _, key := range keys {
+		var userID uint
+		if _, err := fmt.Sscanf(key, "online:%d", &userID); err == nil {
+			onlineUsers = append(onlineUsers, userID)
+		}
+	}
+	return onlineUsers, nil
+}
+
+func (h *Hub) StartHeartbeat(client *Client) {
+	if client.UserID == 0 {
+		return
+	}
+
+	ticker := time.NewTicker(10 * time.Second)
+
+	go func() {
+		defer ticker.Stop()
+
+		h.SetUserOnline(client.UserID)
+
+		for {
+			select {
+			case <-ticker.C:
+				if err := h.SetUserOnline(client.UserID); err != nil {
+					log.Printf("Failed to refresh online status for user %d: %v", client.UserID, err)
+					return
+				}
+			case <-h.ctx.Done():
+				h.SetUserOffline(client.UserID)
+				return
+			}
+		}
+	}()
 }

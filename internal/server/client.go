@@ -258,10 +258,10 @@ func (c *MyServerClient) sendError(errStr string) {
 }
 func (c *MyServerClient) sendPrivateMessage(targetID string, message []byte) {
 	c.Hub.Mu.RLock()
-	target, exists := c.Hub.Clients[targetID]
-
+	target, localExists := c.Hub.Clients[targetID]
 	c.Hub.Mu.RUnlock()
-	if exists {
+
+	if localExists {
 		select {
 		case target.Send <- message:
 			ack, _ := json.Marshal(map[string]any{
@@ -269,12 +269,27 @@ func (c *MyServerClient) sendPrivateMessage(targetID string, message []byte) {
 				"to":     targetID,
 				"status": "delivered",
 			})
-
 			c.Send <- ack
+			return
 		default:
-			c.sendError("User is not available")
+			c.sendError("User is busy (buffer full)")
+			return
 		}
-	} else {
-		c.sendError("User not found")
 	}
+
+	ctx := context.Background()
+
+	err := c.Hub.RedisClient.Publish(ctx, "user:"+targetID, message).Err()
+
+	if err != nil {
+		c.sendError("Failed to send message")
+		return
+	}
+
+	ack, _ := json.Marshal(map[string]any{
+		"type":   "private_message_ack",
+		"to":     targetID,
+		"status": "sent",
+	})
+	c.Send <- ack
 }
