@@ -1,23 +1,22 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import type { FormEvent } from 'react'
-import type { ChatMessage, Presence } from '../types/chat'
+import type { ChatMessage, OnlineUser } from '../types/chat'
 
 const now = () => Math.floor(Date.now() / 1000)
 
-export function useChatSocket(roomId: string, token: string | null) {
+export function useChatSocket(roomId: string, token: string | null, userId?: string) {
   const [wsUrl] = useState('ws://localhost:8080/ws')
-  // clientId is now derived from token or random, but for now let's keep it random-ish but maybe stable if we had user info
-  // simpler to just let server handle identity via token
   const [clientId] = useState(`ui_${Math.random().toString(36).slice(2, 8)}`)
   const [connected, setConnected] = useState(false)
   const [messageText, setMessageText] = useState('')
   const [messages, setMessages] = useState<ChatMessage[]>([])
-  const [presence, setPresence] = useState<Presence>({ roomMembers: [], typingUsers: [] })
+  const [typingUsers, setTypingUsers] = useState<string[]>([])
+  const [onlineUsers, setOnlineUsers] = useState<OnlineUser[]>([])
 
   const wsRef = useRef<WebSocket | null>(null)
   const typingTimeoutRef = useRef<number | null>(null)
 
-  const onlineCount = useMemo(() => Math.max(1, new Set(presence.roomMembers).size), [presence.roomMembers])
+  const onlineCount = useMemo(() => onlineUsers.length, [onlineUsers])
 
   // Auto-connect when roomId or token changes
   useEffect(() => {
@@ -40,119 +39,144 @@ export function useChatSocket(roomId: string, token: string | null) {
       console.log('WS Open');
       setConnected(true)
       // Join the specific room
-      console.log('Joining room:', roomId);
       ws.send(JSON.stringify({ type: 'join_room', room: roomId }))
       // Clear previous messages when switching rooms
       setMessages([])
+      setTypingUsers([])
+      // Request online users
+      ws.send(JSON.stringify({ type: 'get_online_users' }))
     }
 
     ws.onmessage = (event) => {
       try {
-        console.log('WS Message:', event.data);
         const raw = JSON.parse(event.data)
 
-        if (raw.type === 'room_joined') {
-          console.log('Room Joined:', raw);
-          setPresence((prev) => ({ ...prev, roomMembers: raw.members ?? [] }))
-          return
-        }
+        switch (raw.type) {
+          case 'room_joined': {
+            break
+          }
 
-        if (raw.type === 'user_typing' && raw.userID && raw.userID !== clientId) {
-          // ... existing logic
-          setPresence((prev) => {
-            if (prev.typingUsers.includes(raw.userID)) return prev
-            return { ...prev, typingUsers: [...prev.typingUsers, raw.userID] }
-          })
-          window.setTimeout(() => {
-            setPresence((prev) => ({
-              ...prev,
-              typingUsers: prev.typingUsers.filter((id) => id !== raw.userID),
-            }))
-          }, 1800)
-          return
-        }
+          case 'user_typing': {
+            if (raw.userID && raw.userID !== clientId) {
+              const typingName = raw.username || raw.userID
+              setTypingUsers((prev) => {
+                if (prev.includes(typingName)) return prev
+                return [...prev, typingName]
+              })
+              window.setTimeout(() => {
+                setTypingUsers((prev) => prev.filter((name) => name !== typingName))
+              }, 1800)
+            }
+            break
+          }
 
-        if (raw.type === 'user_joined_room' && raw.userId) {
-          console.log('User Joined:', raw);
-          setPresence((prev) => ({
-            ...prev,
-            roomMembers: [...new Set([...prev.roomMembers, raw.userId])],
-          }))
-          return
-        }
+          case 'user_joined_room': {
+            break
+          }
 
-        if (raw.type === 'user_left_room' && raw.userID) {
-          console.log('User Left:', raw);
-          setPresence((prev) => ({
-            ...prev,
-            roomMembers: prev.roomMembers.filter((id) => id !== raw.userID),
-          }))
-          return
-        }
+          case 'user_left_room': {
+            break
+          }
 
-        if (raw.type === 'history_message') {
-          console.log('History Message:', raw);
-          appendMessage({
-            id: crypto.randomUUID(),
-            content: raw.content,
-            senderName: raw.sender_name ?? `User ${raw.sender}`,
-            senderId: String(raw.sender),
-            timestamp: Math.floor(new Date(raw.time).getTime() / 1000),
-            mine: false, // History doesn't easily convert to "mine" without user ID check, improving later
-            kind: 'message',
-          })
-          return
-        }
+          case 'history_message': {
+            const senderUserId = Number(raw.sender)
+            const mine = userId ? String(senderUserId) === String(userId) : false
+            appendMessage({
+              id: String(raw.message_id ?? crypto.randomUUID()),
+              messageId: raw.message_id ? Number(raw.message_id) : undefined,
+              content: raw.content,
+              senderName: raw.sender_name ?? `User ${raw.sender}`,
+              senderId: String(raw.sender),
+              senderUserId,
+              timestamp: Math.floor(new Date(raw.time).getTime() / 1000),
+              mine,
+              kind: 'message',
+              isEdited: raw.is_edited ?? false,
+              isDeleted: raw.is_deleted ?? false,
+              editedAt: raw.edited_at ? Math.floor(new Date(raw.edited_at).getTime() / 1000) : undefined,
+            })
+            break
+          }
 
-        if (raw.type === 'room_message') {
-          console.log('Room Message Received:', raw);
-          // We need to know our own user ID accurately for "mine" to work.
-          // For now relying on server echoing sender_id vs our clientId might be flaky if clientId isn't the auth ID.
-          // Ideally server sends "sender_id" which matches the decoded JWT sub. 
-          // We will assume `raw.sender_id === clientId` logic might need fix if clientId != auth user id.
-          // BUT, since we are sending token, server knows us.
+          case 'room_message': {
+            const senderUserId = Number(raw.sender)
+            const mine = userId ? String(senderUserId) === String(userId) : raw.sender_id === clientId
+            appendMessage({
+              id: String(raw.message_id ?? crypto.randomUUID()),
+              messageId: raw.message_id ? Number(raw.message_id) : undefined,
+              content: raw.content,
+              senderName: raw.sender_name ?? `User ${raw.sender}`,
+              senderId: raw.sender_id ?? String(raw.sender),
+              senderUserId,
+              timestamp: Number(raw.timestamp ?? now()),
+              mine,
+              kind: 'message',
+            })
+            break
+          }
 
-          // Temporary fix: check if we just sent this? No, async. 
-          // Let's assume for now `mine` needs better check against Auth User ID.
+          case 'message_edited': {
+            setMessages((prev) =>
+              prev.map((msg) =>
+                msg.messageId === Number(raw.message_id)
+                  ? {
+                    ...msg,
+                    content: raw.content,
+                    isEdited: true,
+                    editedAt: Number(raw.edited_at ?? now()),
+                  }
+                  : msg
+              )
+            )
+            break
+          }
 
-          const mine = raw.sender_id === clientId // This might be wrong if clientId is random.
-          // Better: use the token's user ID if available in context. 
+          case 'message_deleted': {
+            setMessages((prev) =>
+              prev.map((msg) =>
+                msg.messageId === Number(raw.message_id)
+                  ? {
+                    ...msg,
+                    content: '[Message deleted]',
+                    isDeleted: true,
+                  }
+                  : msg
+              )
+            )
+            break
+          }
 
-          appendMessage({
-            id: String(raw.message_id ?? crypto.randomUUID()),
-            content: raw.content,
-            senderName: raw.sender_name ?? `User ${raw.sender}`,
-            senderId: raw.sender_id ?? String(raw.sender),
-            timestamp: Number(raw.timestamp ?? now()),
-            mine,
-            kind: 'message',
-          })
-          return
-        }
+          case 'presence_update': {
+            if (Array.isArray(raw.online_users)) {
+              setOnlineUsers(raw.online_users.map((uid: number) => ({ id: uid, username: `User ${uid}` })))
+            }
+            break
+          }
 
-        if (raw.type === 'error') {
-          console.error("WS Error:", raw.error);
+          case 'error': {
+            console.error("WS Error:", raw.error)
+            break
+          }
+
+          default:
+            break
         }
       } catch (e) {
-        console.error("WS Parse Error", e);
+        console.error("WS Parse Error", e)
       }
     }
 
     ws.onclose = () => {
-      console.log('WS Closed');
       setConnected(false)
     }
-    ws.onerror = (e) => {
-      console.error('WS Error:', e);
+    ws.onerror = () => {
       setConnected(false)
     }
 
     return () => {
-      console.log('WS Cleanup');
       ws.close()
     }
-  }, [roomId, token, wsUrl, clientId])
-
+  }, [roomId, token, wsUrl, clientId, userId])
 
   const appendMessage = (message: ChatMessage) => {
     setMessages((prev) => [...prev.slice(-199), message])
@@ -169,9 +193,7 @@ export function useChatSocket(roomId: string, token: string | null) {
     if (typingTimeoutRef.current) {
       window.clearTimeout(typingTimeoutRef.current)
     }
-    typingTimeoutRef.current = window.setTimeout(() => {
-      // Optimistic local clear? No, wait for server or just timeout.
-    }, 1200)
+    typingTimeoutRef.current = window.setTimeout(() => { }, 1200)
   }
 
   const sendMessage = (event: FormEvent) => {
@@ -189,13 +211,45 @@ export function useChatSocket(roomId: string, token: string | null) {
     setMessageText('')
   }
 
+  const editMessage = useCallback((messageId: number, newContent: string) => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return
+    wsRef.current.send(
+      JSON.stringify({
+        type: 'edit_message',
+        room: roomId,
+        message_id: messageId,
+        content: newContent,
+      }),
+    )
+  }, [roomId])
+
+  const deleteMessage = useCallback((messageId: number) => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return
+    wsRef.current.send(
+      JSON.stringify({
+        type: 'delete_message',
+        room: roomId,
+        message_id: messageId,
+      }),
+    )
+  }, [roomId])
+
+  const requestOnlineUsers = useCallback(() => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return
+    wsRef.current.send(JSON.stringify({ type: 'get_online_users' }))
+  }, [])
+
   return {
     connected,
     messageText,
     messages,
-    presence,
+    typingUsers,
     onlineCount,
+    onlineUsers,
     handleInput,
     sendMessage,
+    editMessage,
+    deleteMessage,
+    requestOnlineUsers,
   }
 }

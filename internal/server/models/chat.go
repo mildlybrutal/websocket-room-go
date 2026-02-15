@@ -20,9 +20,8 @@ type Chat struct {
 	IsEdited bool       `gorm:"default:false" json:"is_edited"`
 	EditedAt *time.Time `gorm:"index" json:"edited_at,omitempty"`
 
-	IsDeleted bool       `gorm:"default:false;index" json:"is_deleted"`
-	DeletedAt *time.Time `json:"deleted_at,omitempty"`
-	DeletedBy uint       `gorm:"not null;index" json:"deleted_by"`
+	IsDeleted bool `gorm:"default:false;index" json:"is_deleted"`
+	DeletedBy uint `gorm:"default:0" json:"deleted_by"`
 }
 
 type MessageReadReceipt struct {

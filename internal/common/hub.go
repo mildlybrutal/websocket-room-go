@@ -286,10 +286,14 @@ func (h *Hub) JoinRoom(RoomID string, client *Client) error {
 		for _, msg := range history {
 			historyJSON, _ := json.Marshal(map[string]any{
 				"type":        "history_message",
+				"message_id":  msg.ID,
 				"content":     msg.Content,
 				"sender":      msg.SenderID,
 				"sender_name": msg.Sender.Username,
 				"time":        msg.CreatedAt,
+				"is_edited":   msg.IsEdited,
+				"edited_at":   msg.EditedAt,
+				"is_deleted":  msg.IsDeleted,
 			})
 			client.Send <- historyJSON
 		}
@@ -353,13 +357,13 @@ func (h *Hub) LeaveRoom(client *Client, RoomID string) {
 
 func (h *Hub) SetUserOnline(userID uint) error {
 	ctx := context.Background()
-	key := fmt.Sprintf("online: %d", userID)
+	key := fmt.Sprintf("online:%d", userID)
 	return h.RedisClient.Set(ctx, key, "1", 30*time.Second).Err()
 }
 
 func (h *Hub) SetUserOffline(userID uint) error {
 	ctx := context.Background()
-	key := fmt.Sprintf("online: %d", userID)
+	key := fmt.Sprintf("online:%d", userID)
 	return h.RedisClient.Del(ctx, key).Err()
 }
 

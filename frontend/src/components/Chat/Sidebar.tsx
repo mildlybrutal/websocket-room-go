@@ -1,9 +1,10 @@
 import { useState, useEffect } from "react";
-import { Link, useLocation } from "react-router-dom";
-import { Hash, LogOut, Plus, Search, MessageSquare, Settings } from "lucide-react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { Hash, LogOut, Plus, Search, MessageSquare, Settings, Users, Circle } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import { api } from "../../services/api";
 import type { Room } from "../../types/room";
+import type { OnlineUser } from "../../types/chat";
 import { CreateRoomModal } from "../Modals/CreateRoomModal";
 import { JoinRoomModal } from "../Modals/JoinRoomModal";
 
@@ -12,11 +13,16 @@ export function Sidebar() {
     const [rooms, setRooms] = useState<Room[]>([]);
     const [isCreateOpen, setIsCreateOpen] = useState(false);
     const [isJoinOpen, setIsJoinOpen] = useState(false);
+    const [onlineUsers, setOnlineUsers] = useState<OnlineUser[]>([]);
     const location = useLocation();
+    const navigate = useNavigate();
 
     useEffect(() => {
         if (token) {
             fetchRooms();
+            fetchOnlineUsers();
+            const interval = setInterval(fetchOnlineUsers, 15000);
+            return () => clearInterval(interval);
         }
     }, [token]);
 
@@ -24,19 +30,31 @@ export function Sidebar() {
         try {
             if (token) {
                 const data = await api.getRooms(token);
-                setRooms(data);
+                setRooms(Array.isArray(data) ? data : []);
             }
         } catch (error) {
             console.error("Failed to fetch rooms", error);
         }
     };
 
-    const handleRoomCreated = (name: string) => {
+    const fetchOnlineUsers = async () => {
+        try {
+            if (token) {
+                const data = await api.getOnlineUsers(token);
+                setOnlineUsers(data.online_users ?? []);
+            }
+        } catch (error) {
+            console.error("Failed to fetch online users", error);
+        }
+    };
+
+    const handleRoomCreated = (_name: string) => {
         fetchRooms();
     };
 
     const handleRoomJoined = (room: Room) => {
         fetchRooms();
+        navigate(`/room/${room.id}`);
     };
 
     return (
@@ -109,6 +127,36 @@ export function Sidebar() {
                             );
                         })}
                     </nav>
+
+                    {/* Online Users */}
+                    <div className="px-4 mt-8 mb-2 flex items-center justify-between">
+                        <div className="text-xs font-bold text-cat-overlay0 uppercase tracking-wider flex items-center gap-1.5">
+                            <Users size={12} />
+                            Online — {onlineUsers.length}
+                        </div>
+                    </div>
+                    <div className="px-2 space-y-0.5">
+                        {onlineUsers.length > 0 ? (
+                            onlineUsers.map((u) => (
+                                <div
+                                    key={u.id}
+                                    className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-cat-subtext0 hover:bg-cat-surface0/50 transition-colors"
+                                >
+                                    <div className="relative">
+                                        <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-cat-teal to-cat-green flex items-center justify-center text-[10px] font-bold text-cat-base">
+                                            {u.username.charAt(0).toUpperCase()}
+                                        </div>
+                                        <Circle size={8} className="absolute -bottom-0.5 -right-0.5 text-cat-green fill-cat-green" />
+                                    </div>
+                                    <span className="text-sm truncate">{u.username}</span>
+                                </div>
+                            ))
+                        ) : (
+                            <div className="px-4 py-4 text-center">
+                                <p className="text-xs text-cat-overlay0">No users online</p>
+                            </div>
+                        )}
+                    </div>
 
                     {/* Direct Messages Placeholder */}
                     <div className="px-4 mt-8 mb-2 flex items-center justify-between">

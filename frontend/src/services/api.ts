@@ -59,5 +59,21 @@ export const api = {
         });
         if (!response.ok) throw new Error("Failed to join room");
         return response.json();
-    }
+    },
+
+    getOnlineUsers: async (token: string) => {
+        const response = await fetch(`${API_URL}/api/online`, {
+            headers: { "Authorization": `Bearer ${token}` }
+        });
+        if (!response.ok) throw new Error("Failed to fetch online users");
+        return response.json();
+    },
+
+    getHistory: async (roomId: string, token: string) => {
+        const response = await fetch(`${API_URL}/api/room/history?room_id=${roomId}`, {
+            headers: { "Authorization": `Bearer ${token}` }
+        });
+        if (!response.ok) throw new Error("Failed to fetch history");
+        return response.json();
+    },
 };

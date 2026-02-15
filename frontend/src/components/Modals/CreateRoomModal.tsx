@@ -2,6 +2,7 @@ import { useState } from "react";
 import { X, Loader2 } from "lucide-react";
 import { api } from "../../services/api";
 import { useAuth } from "../../context/AuthContext";
+import { useNavigate } from "react-router-dom";
 
 interface CreateRoomModalProps {
     isOpen: boolean;
@@ -14,6 +15,7 @@ export function CreateRoomModal({ isOpen, onClose, onSuccess }: CreateRoomModalP
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const { token } = useAuth();
+    const navigate = useNavigate();
 
     if (!isOpen) return null;
 
@@ -24,10 +26,19 @@ export function CreateRoomModal({ isOpen, onClose, onSuccess }: CreateRoomModalP
 
         try {
             if (token) {
-                await api.createRoom(name, token);
-                onSuccess(name);
+                await api.createRoom(name.trim(), token);
+                onSuccess(name.trim());
+                // Fetch rooms to get the newly created room's ID
+                const rooms = await api.getRooms(token);
+                const roomsArr = Array.isArray(rooms) ? rooms : [];
+                const newRoom = roomsArr.find(
+                    (r: { name: string; id: number }) => r.name === name.trim()
+                );
                 setName("");
                 onClose();
+                if (newRoom) {
+                    navigate(`/room/${newRoom.id}`);
+                }
             }
         } catch (err: any) {
             setError(err.message || "Failed to create room");
