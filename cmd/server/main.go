@@ -90,6 +90,10 @@ func main() {
 		server.RefreshTokenHandler(cfg),
 	))
 
+	http.HandleFunc("/api/online", middleware.AuthMiddleware(
+		server.GetOnlineUsersHandler(userRepo),
+	))
+
 	handler := middleware.CORSMiddleware(cfg)(http.DefaultServeMux)
 
 	srv := &http.Server{

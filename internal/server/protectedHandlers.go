@@ -229,3 +229,42 @@ func JoinRoomHandler(roomRepo *repository.RoomRepository) http.HandlerFunc {
 		})
 	}
 }
+
+func GetOnlineUsersHandler(userRepo *repository.UserRepository) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		_, ok := middleware.RequireAuth(r, w)
+		if !ok {
+			return
+		}
+
+		// Get online user IDs from Redis
+		onlineUserIDs, err := MainHub.GetOnlineUsers()
+		if err != nil {
+			http.Error(w, "Failed to fetch online users", http.StatusInternalServerError)
+			return
+		}
+
+		// Fetch user details for online users
+		type OnlineUser struct {
+			ID       uint   `json:"id"`
+			Username string `json:"username"`
+		}
+
+		onlineUsers := make([]OnlineUser, 0, len(onlineUserIDs))
+		for _, userID := range onlineUserIDs {
+			user, err := userRepo.GetByID(userID)
+			if err == nil {
+				onlineUsers = append(onlineUsers, OnlineUser{
+					ID:       user.ID,
+					Username: user.Username,
+				})
+			}
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"online_users": onlineUsers,
+			"count":        len(onlineUsers),
+		})
+	}
+}

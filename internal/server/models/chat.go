@@ -2,6 +2,7 @@ package models
 
 import (
 	"encoding/json"
+	"time"
 
 	"gorm.io/gorm"
 )
@@ -15,10 +16,26 @@ type Chat struct {
 	Metadata json.RawMessage `gorm:"type:jsonb;default:'[]'"`
 	Room     Room            `gorm:"foreignKey:RoomID"`
 	Sender   User            `gorm:"foreignKey:SenderID"`
+
+	IsEdited bool       `gorm:"default:false" json:"is_edited"`
+	EditedAt *time.Time `gorm:"index" json:"edited_at,omitempty"`
+
+	IsDeleted bool       `gorm:"default:false;index" json:"is_deleted"`
+	DeletedAt *time.Time `json:"deleted_at,omitempty"`
+	DeletedBy uint       `gorm:"not null;index" json:"deleted_by"`
+}
+
+type MessageReadReceipt struct {
+	gorm.Model
+	MessageID uint      `gorm:"not null;index:idx_message_user,unique" json:"message_id"`
+	UserID    uint      `gorm:"not null;index:idx_message_user,unique" json:"user_id"`
+	ReadAt    time.Time `gorm:"not null" json:"read_at"`
+	Message   Chat      `gorm:"foreignKey:MessageID"`
+	User      User      `gorm:"foreignKey:UserID"`
 }
 
 func MigrateChat(db *gorm.DB) error {
-	err := db.AutoMigrate(&Chat{})
+	err := db.AutoMigrate(&Chat{}, &MessageReadReceipt{})
 
 	return err
 }

@@ -77,6 +77,11 @@ func HandleConnections(userRepo UserRepo) http.HandlerFunc {
 
 		serverClient.Hub.Register <- baseClient
 
+		if userID > 0 {
+			MainHub.StartHeartbeat(baseClient)
+			log.Printf("Started heartbeat for user %d (%s)", userID, username)
+		}
+
 		go serverClient.WritePump()
 		go serverClient.ReadPump()
 	}

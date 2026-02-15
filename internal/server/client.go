@@ -11,6 +11,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/mildlybrutal/websocketGo/internal/common"
+	"github.com/mildlybrutal/websocketGo/internal/repository"
 	"github.com/mildlybrutal/websocketGo/internal/server/models"
 	"golang.org/x/time/rate"
 )
@@ -131,6 +132,15 @@ func (c *MyServerClient) HandleMessage(message []byte) {
 		}
 	case "typing":
 		c.handleTyping(msg)
+
+	case "edit_message":
+		c.handleEditMessage(msg)
+	case "delete_message":
+		c.handleDeleteMessage(msg)
+	case "mark_read":
+		c.handleMarkRead(msg)
+	case "get_online_users":
+		c.handlePresenceRequest(msg)
 	default:
 		// Global broadcast
 		c.Hub.Broadcast <- common.BroadcastMessage{Message: message, Sender: c.Client}
@@ -292,4 +302,152 @@ func (c *MyServerClient) sendPrivateMessage(targetID string, message []byte) {
 		"status": "sent",
 	})
 	c.Send <- ack
+}
+
+func (c *MyServerClient) handleEditMessage(msg map[string]any) {
+	messageIDFloat, ok := msg["message_id"].(float64)
+	if !ok {
+		c.sendError("message_id is required")
+		return
+	}
+	messageID := uint(messageIDFloat)
+
+	newContent, ok := msg["content"].(string)
+	if !ok || strings.TrimSpace(newContent) == "" {
+		c.sendError("content is required")
+		return
+	}
+
+	roomIDStr, ok := msg["room"].(string)
+	if !ok {
+		c.sendError("room is required")
+		return
+	}
+
+	// Sanitize content
+	newContent = strings.TrimSpace(html.EscapeString(newContent))
+
+	// Update in database
+	repo, ok := c.Hub.ChatRepo.(*repository.ChatRepository)
+	if !ok {
+		c.sendError("Internal error")
+		return
+	}
+
+	if err := repo.EditMessage(messageID, newContent, c.UserID); err != nil {
+		log.Printf("Failed to edit message %d: %v", messageID, err)
+		c.sendError("Failed to edit message")
+		return
+	}
+
+	// Broadcast edit notification via Redis
+	editNotif := map[string]any{
+		"type":        "message_edited",
+		"room":        roomIDStr,
+		"message_id":  messageID,
+		"content":     newContent,
+		"edited_by":   c.UserID,
+		"editor_name": c.Username,
+		"edited_at":   time.Now().Unix(),
+	}
+
+	redisMsg, _ := json.Marshal(editNotif)
+	ctx := context.Background()
+	c.Hub.RedisClient.Publish(ctx, "room:"+roomIDStr, redisMsg)
+
+	log.Printf("Message %d edited by user %d in room %s", messageID, c.UserID, roomIDStr)
+}
+
+func (c *MyServerClient) handleDeleteMessage(msg map[string]any) {
+	messageIDFloat, ok := msg["message_id"].(float64)
+	if !ok {
+		c.sendError("message_id is required")
+		return
+	}
+	messageID := uint(messageIDFloat)
+
+	roomIDStr, ok := msg["room"].(string)
+	if !ok {
+		c.sendError("room is required")
+		return
+	}
+
+	// Delete in database
+	repo, ok := c.Hub.ChatRepo.(*repository.ChatRepository)
+	if !ok {
+		c.sendError("Internal error")
+		return
+	}
+
+	if err := repo.DeleteMessage(messageID, c.UserID); err != nil {
+		log.Printf("Failed to delete message %d: %v", messageID, err)
+		c.sendError("Failed to delete message")
+		return
+	}
+
+	// Broadcast delete notification via Redis
+	deleteNotif := map[string]any{
+		"type":         "message_deleted",
+		"room":         roomIDStr,
+		"message_id":   messageID,
+		"deleted_by":   c.UserID,
+		"deleter_name": c.Username,
+		"deleted_at":   time.Now().Unix(),
+	}
+
+	redisMsg, _ := json.Marshal(deleteNotif)
+	ctx := context.Background()
+	c.Hub.RedisClient.Publish(ctx, "room:"+roomIDStr, redisMsg)
+
+	log.Printf("Message %d deleted by user %d in room %s", messageID, c.UserID, roomIDStr)
+}
+
+func (c *MyServerClient) handleMarkRead(msg map[string]any) {
+	messageIDsRaw, ok := msg["message_ids"].([]interface{})
+	if !ok {
+		c.sendError("message_ids array is required")
+		return
+	}
+
+	repo, ok := c.Hub.ChatRepo.(*repository.ChatRepository)
+	if !ok {
+		c.sendError("Internal error")
+		return
+	}
+
+	readCount := 0
+	for _, idRaw := range messageIDsRaw {
+		if idFloat, ok := idRaw.(float64); ok {
+			messageID := uint(idFloat)
+			if err := repo.MarkMessageAsRead(messageID, c.UserID); err == nil {
+				readCount++
+			}
+		}
+	}
+
+	// Send acknowledgment
+	ack, _ := json.Marshal(map[string]any{
+		"type":         "read_receipt_ack",
+		"marked_count": readCount,
+		"user_id":      c.UserID,
+	})
+	c.Send <- ack
+
+	log.Printf("User %d marked %d messages as read", c.UserID, readCount)
+}
+
+func (c *MyServerClient) handlePresenceRequest(msg map[string]any) {
+	onlineUsers, err := c.Hub.GetOnlineUsers()
+	if err != nil {
+		log.Printf("Failed to get online users: %v", err)
+		c.sendError("Failed to fetch online users")
+		return
+	}
+
+	response, _ := json.Marshal(map[string]any{
+		"type":         "presence_update",
+		"online_users": onlineUsers,
+	})
+
+	c.Send <- response
 }
