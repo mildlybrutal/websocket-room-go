@@ -31,7 +31,7 @@ A scalable real-time chat system built with Go, WebSocket, Redis pub/sub, and Po
 
 ## Landing Page
 
-<!-- This is a comment that will be hidden in the rendered output -->
+https://github.com/user-attachments/assets/0bd24958-a641-4e8a-95b3-538bfb595cd4
 
 ## Architecture
 
