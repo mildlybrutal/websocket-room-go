@@ -29,6 +29,10 @@ A scalable real-time chat system built with Go, WebSocket, Redis pub/sub, and Po
 - Graceful shutdown support
 - Room-based message isolation
 
+## Landing Page
+
+<!-- This is a comment that will be hidden in the rendered output -->
+
 ## Architecture
 
 ### High-Level System Architecture
@@ -145,6 +149,8 @@ graph TB
 - **Cache/Pub-Sub**: Redis
 - **Authentication**: JWT (golang-jwt/jwt)
 - **Configuration**: Viper
+- **Frontend**: React, TypeScript, Tailwind CSS v4
+- **Containerization**: Docker, Docker Compose
 
 ## Project Structure
 
@@ -160,7 +166,8 @@ websocketGo/
 │   │   ├── room.go             # Room management
 │   │   └── config.go           # Configuration
 │   ├── middleware/
-│   │   └── auth.go             # JWT authentication
+│   │   ├── auth.go             # JWT authentication
+│   │   └── cors.go             # CORS middleware
 │   ├── repository/
 │   │   ├── user_repo.go        # User data access
 │   │   ├── chat_repo.go        # Chat data access
@@ -174,6 +181,19 @@ websocketGo/
 │   └── storage/
 │       ├── postgres.go         # PostgreSQL connection
 │       └── redis.go            # Redis connection
+├── frontend/
+│   └── src/
+│       ├── components/
+│       │   ├── Auth/            # Login, Signup
+│       │   ├── Chat/            # Sidebar, ChatArea, MessageBubble
+│       │   ├── Layout/          # MainLayout
+│       │   └── Modals/          # CreateRoomModal, JoinRoomModal
+│       ├── context/             # AuthContext
+│       ├── hooks/               # useChatSocket
+│       ├── services/            # API client
+│       └── types/               # TypeScript interfaces
+├── docker-compose.yml
+├── Dockerfile
 ├── config.yaml                 # Configuration file
 └── go.mod
 ```
@@ -193,8 +213,10 @@ websocketGo/
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/api/profile` | Get user profile |
+| GET | `/api/rooms` | List all rooms |
 | GET | `/api/room/history` | Get room message history |
 | POST | `/api/room/create` | Create new chat room |
+| POST | `/api/room/join` | Join an existing room |
 | POST | `/api/auth/refresh` | Refresh JWT token |
 
 ### WebSocket Endpoint
@@ -316,3 +338,25 @@ WS /ws?token=<jwt_token>&id=<client_id>
 - Each server maintains its own client connections
 - Redis pub/sub synchronizes messages across servers
 - Database stores persistent message history
+
+### 5. Room Management
+- Rooms are created via REST API and stored in PostgreSQL
+- Creating a room automatically adds the creator as a member
+- Users can join rooms via the `/api/room/join` endpoint
+- Room membership is tracked in the `room_members` table
+
+## Running Locally
+
+### Backend (Docker)
+
+```sh
+docker compose up --build
+```
+
+### Frontend
+
+```sh
+cd frontend
+npm install
+npm run dev
+```
