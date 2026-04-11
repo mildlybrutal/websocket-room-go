@@ -8,6 +8,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/mildlybrutal/websocketGo/internal/common"
+	"github.com/mildlybrutal/websocketGo/internal/metrics"
 	"github.com/mildlybrutal/websocketGo/internal/middleware"
 	"github.com/mildlybrutal/websocketGo/internal/server/models"
 )
@@ -24,9 +25,9 @@ type UserRepo interface {
 	GetByID(uint) (*models.User, error)
 }
 
-func HandleConnections(userRepo UserRepo) http.HandlerFunc {
+func HandleConnections(userRepo UserRepo, cfg *common.Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		cfg, _ := common.LoadConfig(".")
+		//cfg, _ := common.LoadConfig(".")
 
 		var userID uint
 		var username string = "Anonymous"
@@ -76,6 +77,7 @@ func HandleConnections(userRepo UserRepo) http.HandlerFunc {
 		serverClient := NewServerClient(baseClient)
 
 		serverClient.Hub.Register <- baseClient
+		metrics.ActiveConnections.Inc()
 
 		if userID > 0 {
 			MainHub.StartHeartbeat(baseClient)

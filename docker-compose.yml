@@ -1,10 +1,12 @@
-version: "3.8"
-
 services:
     server:
         build:
             context: .
             dockerfile: Dockerfile
+        ulimits:
+            nofile:
+                soft: 65536
+                hard: 65536
         container_name: websocket_server
         restart: unless-stopped
         ports:
@@ -62,7 +64,15 @@ services:
             - redis_data:/data
         networks:
             - app-network
-
+    prometheus:
+        image: prom/prometheus:latest
+        container_name: websocket_prometheus
+        volumes:
+            - ./prometheus.yml:/etc/prometheus/prometheus.yml
+        ports:
+            - "9090:9090"
+        networks:
+            - app-network
 networks:
     app-network:
         driver: bridge

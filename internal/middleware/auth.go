@@ -18,7 +18,7 @@ const (
 	UsernameKey contextKey = "username"
 )
 
-func AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
+func AuthMiddleware(cfg *common.Config, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		authHeader := r.Header.Get("Authorization")
 		if authHeader == "" {
@@ -33,14 +33,6 @@ func AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		}
 
 		tokenString := parts[1]
-
-		cfg, err := common.LoadConfig(".")
-
-		if err != nil {
-			log.Printf("Failed to load config in auth middleware: %v", err)
-			http.Error(w, "Internal server error", http.StatusInternalServerError)
-			return
-		}
 
 		userID, username, err := ValidateTokenWithClaims(tokenString, cfg.Security.JWTSecret)
 

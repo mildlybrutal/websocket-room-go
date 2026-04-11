@@ -11,6 +11,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/mildlybrutal/websocketGo/internal/common"
+	"github.com/mildlybrutal/websocketGo/internal/metrics"
 	"github.com/mildlybrutal/websocketGo/internal/repository"
 	"github.com/mildlybrutal/websocketGo/internal/server/models"
 	"golang.org/x/time/rate"
@@ -41,6 +42,7 @@ const (
 
 func (c *MyServerClient) ReadPump() {
 	defer func() {
+		metrics.ActiveConnections.Dec()
 		c.Hub.Unregister <- c.Client
 		c.Conn.Close()
 	}()
@@ -149,55 +151,54 @@ func (c *MyServerClient) HandleMessage(message []byte) {
 }
 
 func (c *MyServerClient) handleRoomMessage(msg map[string]any) {
+	start := time.Now()
 	roomIDStr, ok := msg["room"].(string)
 	if !ok || roomIDStr == "" {
 		c.sendError("Room ID is required")
 		return
 	}
-
 	content, ok := msg["content"].(string)
 	if !ok {
 		c.sendError("Message content is required")
 		return
 	}
-
-	// Sanitize and validate content
 	content = strings.TrimSpace(content)
-
 	if content == "" {
 		c.sendError("Message cannot be empty")
 		return
 	}
-
 	if len(content) > 10000 {
 		c.sendError("Message too long (max 10000 characters)")
 		return
 	}
-
-	// HTML escape to prevent XSS
 	content = html.EscapeString(content)
-
-	// Validate room ID
 	roomID, err := strconv.ParseUint(roomIDStr, 10, 32)
 	if err != nil {
 		c.sendError("Invalid room ID format")
 		return
 	}
 
-	// Save to database
-	chatEntry := &models.Chat{
-		RoomID:   uint(roomID),
-		SenderID: c.UserID,
-		Content:  content,
+	// Declare outside so broadcastMsg can access it
+	var messageID uint
+	var timestamp int64
+
+	if c.UserID != 0 {
+		chatEntry := &models.Chat{
+			RoomID:   uint(roomID),
+			SenderID: c.UserID,
+			Content:  content,
+		}
+		if err := c.Hub.ChatRepo.SaveMessage(chatEntry); err != nil {
+			log.Printf("DB Save Error for client %s: %v", c.ID, err)
+			c.sendError("Failed to save message")
+			return
+		}
+		messageID = chatEntry.ID
+		timestamp = chatEntry.CreatedAt.Unix()
+	} else {
+		timestamp = time.Now().Unix()
 	}
 
-	if err := c.Hub.ChatRepo.SaveMessage(chatEntry); err != nil {
-		log.Printf("DB Save Error for client %s: %v", c.ID, err)
-		c.sendError("Failed to save message")
-		return
-	}
-
-	// Prepare broadcast message
 	broadcastMsg := map[string]any{
 		"type":        "room_message",
 		"room":        roomIDStr,
@@ -205,8 +206,8 @@ func (c *MyServerClient) handleRoomMessage(msg map[string]any) {
 		"sender":      c.UserID,
 		"sender_id":   c.ID,
 		"sender_name": c.Username,
-		"message_id":  chatEntry.ID,
-		"timestamp":   chatEntry.CreatedAt.Unix(),
+		"message_id":  messageID,
+		"timestamp":   timestamp,
 	}
 
 	redisMsg, err := json.Marshal(broadcastMsg)
@@ -216,18 +217,21 @@ func (c *MyServerClient) handleRoomMessage(msg map[string]any) {
 		return
 	}
 
-	// Publish to Redis (listener will broadcast to all servers)
 	ctx := context.Background()
 	channel := "room:" + roomIDStr
 
 	err = c.Hub.RedisClient.Publish(ctx, channel, redisMsg).Err()
 	if err != nil {
+		metrics.RedisPublishErrors.Inc()
 		log.Printf("Redis Publish Error for room %s: %v", roomIDStr, err)
 		c.sendError("Failed to send message")
 		return
 	}
 
-	log.Printf("Message published - user: %d, room: %s, msgID: %d", c.UserID, roomIDStr, chatEntry.ID)
+	metrics.MessagesTotal.WithLabelValues(roomIDStr).Inc()
+	metrics.MessageLatency.Observe(time.Since(start).Seconds())
+
+	log.Printf("Message published - user: %d, room: %s, msgID: %d", c.UserID, roomIDStr, messageID)
 }
 
 func (c *MyServerClient) handleTyping(msg map[string]any) {

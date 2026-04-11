@@ -16,6 +16,7 @@ import (
 	"github.com/mildlybrutal/websocketGo/internal/server"
 	"github.com/mildlybrutal/websocketGo/internal/server/models"
 	"github.com/mildlybrutal/websocketGo/internal/storage"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 func main() {
@@ -64,35 +65,37 @@ func main() {
 	http.HandleFunc("/sign-up", server.SignUpHandler(userRepo))
 	http.HandleFunc("/login", server.LoginHandler(userRepo, cfg))
 	//protected
-	http.HandleFunc("/ws", server.HandleConnections(userRepo))
+	http.HandleFunc("/ws", server.HandleConnections(userRepo, cfg))
 
-	http.HandleFunc("/api/profile", middleware.AuthMiddleware(
+	http.HandleFunc("/api/profile", middleware.AuthMiddleware(cfg,
 		server.GetUserProfileHandler(userRepo),
 	))
 
-	http.HandleFunc("/api/room/history", middleware.AuthMiddleware(
+	http.HandleFunc("/api/room/history", middleware.AuthMiddleware(cfg,
 		server.GetRoomHistoryHandler(chatRepo, roomRepo),
 	))
 
-	http.HandleFunc("/api/room/create", middleware.AuthMiddleware(
+	http.HandleFunc("/api/room/create", middleware.AuthMiddleware(cfg,
 		server.CreateRoomHandler(roomRepo),
 	))
 
-	http.HandleFunc("/api/rooms", middleware.AuthMiddleware(
+	http.HandleFunc("/api/rooms", middleware.AuthMiddleware(cfg,
 		server.GetRoomsHandler(roomRepo),
 	))
 
-	http.HandleFunc("/api/room/join", middleware.AuthMiddleware(
+	http.HandleFunc("/api/room/join", middleware.AuthMiddleware(cfg,
 		server.JoinRoomHandler(roomRepo),
 	))
 
-	http.HandleFunc("/api/auth/refresh", middleware.AuthMiddleware(
+	http.HandleFunc("/api/auth/refresh", middleware.AuthMiddleware(cfg,
 		server.RefreshTokenHandler(cfg),
 	))
 
-	http.HandleFunc("/api/online", middleware.AuthMiddleware(
+	http.HandleFunc("/api/online", middleware.AuthMiddleware(cfg,
 		server.GetOnlineUsersHandler(userRepo),
 	))
+
+	http.Handle("/metrics", promhttp.Handler())
 
 	handler := middleware.CORSMiddleware(cfg)(http.DefaultServeMux)
 
